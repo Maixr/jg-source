@@ -57,7 +57,35 @@ func _ready() -> void:
 	_font.allow_system_fallback = true
 	path = UnitData.PATH_POINTS.duplicate()
 	_build_cells()
+	# 房屋升级时，场上已有的分身立刻跟着变强（而不是只管之后新放的）
+	if GS != null:
+		GS.house_changed.connect(_on_house_changed)
 	set_process(true)
+
+
+## 小屋重建后，把新倍率套用到所有已存在的分身上。
+func _on_house_changed(_stage: int) -> void:
+	var mult: float = GS.tower_mult()
+	for t in towers:
+		(t as Tower).reapply_mult(mult)
+	if not towers.is_empty():
+		_flash_text(
+			(towers[0] as Tower).pos + Vector2(0.0, -34.0),
+			"小屋重建：分身 +%d%%" % GS.tower_bonus_percent(),
+			UnitData.LEAF
+		)
+	stats_changed.emit()
+	queue_redraw()
+
+
+## 养成里买纸笔：立刻加进当前这一关（一次性，本关结束就没了）
+func add_ink(amount: float) -> void:
+	if amount <= 0.0:
+		return
+	ink = minf(INK_CAP, ink + amount)
+	_flash_text(Vector2(DESIGN.x * 0.5, 96.0), "+%d 纸笔" % int(amount), UnitData.ORANGE)
+	stats_changed.emit()
+	queue_redraw()
 
 
 # --- 格子 ---
@@ -136,7 +164,7 @@ func start_level(index: int) -> void:
 	speed_scale = 1.0
 	base_max = int(level.get("base_hp", 12))
 	base_hp = base_max
-	ink = float(level.get("start_ink", 20)) + float(GS.ink_bonus())
+	ink = float(level.get("start_ink", 20))
 	_ink_rate = UnitData.INK_REGEN * float(level.get("ink_mult", 1.0))
 	_spawns.clear()
 	_spawn_cursor = 0

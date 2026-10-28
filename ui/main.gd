@@ -52,8 +52,11 @@ func _ready() -> void:
 	_build_level_select()
 	_build_result()
 	GS.insight_changed.connect(_on_economy_changed)
-	GS.packs_changed.connect(_on_economy_changed)
 	GS.house_changed.connect(_on_economy_changed)
+	# 平衡自检：设置 JG_BALANCE=1 后无头启动会跑完五关并打印结果然后退出
+	if OS.has_environment("JG_BALANCE"):
+		_run_balance_check.call_deferred()
+		return
 	_show_level_select()
 	_refresh_hud()
 
@@ -472,7 +475,11 @@ func _on_rebuild_pressed() -> void:
 
 
 func _on_pack_pressed() -> void:
-	GS.buy_ink_pack()
+	# 一次性补给：扣体悟，纸笔立刻加进这一关，关卡结束就没了
+	if not field.running or field.finished:
+		return
+	if GS.buy_ink_pack():
+		field.add_ink(float(GS.ink_pack_bonus()))
 	_refresh_drawer()
 	_refresh_hud()
 
@@ -553,11 +560,15 @@ func _refresh_drawer() -> void:
 		]
 		drawer_rebuild.disabled = float(GS.insight) < float(cost)
 
-	drawer_pack.text = "补充纸笔：+%d/场（%d 体悟，已有 %d）" % [
-		int(UnitData.INK_PACK["bonus"]), int(UnitData.INK_PACK["cost"]), int(GS.ink_packs)
+	drawer_pack.text = "立刻补 %d 纸笔（%d 体悟，仅本关）" % [
+		GS.ink_pack_bonus(), GS.ink_pack_cost()
 	]
-	drawer_pack.disabled = float(GS.insight) < float(UnitData.INK_PACK["cost"])
-	drawer_rate.text = "阅读产出：%.2f 体悟/秒" % float(GS.read_rate())
+	# 只能在关卡进行中买，否则买了就浪费了
+	var can_buy := field.running and not field.finished and float(GS.insight) >= float(GS.ink_pack_cost())
+	drawer_pack.disabled = not can_buy
+	drawer_rate.text = "阅读产出：%.2f 体悟/秒　｜　分身加成：+%d%%（攻击/生命）" % [
+		float(GS.read_rate()), GS.tower_bonus_percent()
+	]
 
 	# 小屋占位表现：越接近完整，画面越亮越有颜色
 	var stage := float(GS.house_stage) / float(UnitData.HOUSE_STAGES.size() - 1)
@@ -566,6 +577,29 @@ func _refresh_drawer() -> void:
 
 
 # --- 调试入口（开发期便捷，正式版可以删掉） ---
+
+## 无头平衡自检：JG_BALANCE=1 启动后跑完全部关卡并打印结果。
+## 调整五关难度就用它验证，不用打开编辑器。
+func _run_balance_check() -> void:
+	var plan := dev_build_plan()
+	# 必须按「废墟」阶段（无房屋加成）来算，这是玩家的下限；事后还原免得改坏存档
+	var saved_stage: int = GS.house_stage
+	GS.house_stage = 0
+	print("=== 平衡自检（小屋=废墟，无房屋加成）===")
+	for i in UnitData.BASE_DATA["levels"].size():
+		for mode in [0, 1]:
+			var r: Dictionary = field.dev_simulate(i, plan, 300.0, mode)
+			var lvsum := 0
+			for tw in field.towers:
+				lvsum += tw.level
+			print("L%d mode%d %s base=%d/%d t=%ds placed=%d lvsum=%d" % [
+				i + 1, mode, "WIN " if r["win"] else "LOSE",
+				r["base"], r["base_max"], r["seconds"], r["placed"], lvsum
+			])
+	GS.house_stage = saved_stage
+	print("=== 自检结束 ===")
+	get_tree().quit()
+
 
 ## 一套通用的测试布阵：锚点位置 + 塔种，模拟器会就近找对应类型的空格。
 ## 顺序即建造顺序（模拟器按纸笔是否够来决定何时放下）。

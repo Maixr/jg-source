@@ -1,18 +1,16 @@
 extends Node
 
-## 全局进度：情感体悟、房屋重建、纸笔补给、关卡解锁、离线收益。
+## 全局进度：情感体悟、房屋重建、关卡解锁、离线收益。
 ## 注册为 Autoload，名字 GameState。
 
 signal insight_changed(value: float)
 signal house_changed(stage: int)
-signal packs_changed(count: int)
 
 const SAVE_PATH := "user://jg_save.json"
 const AUTOSAVE_INTERVAL := 15.0
 
 var insight := 0.0
 var house_stage := 0
-var ink_packs := 0
 var cleared_count := 0
 var last_seen := 0
 
@@ -52,9 +50,14 @@ func read_mult() -> float:
 	return float(UnitData.HOUSE_STAGES[house_stage]["read_mult"])
 
 
-## 塔属性倍率
+## 塔属性倍率。房屋重建会提高它，场上已有的分身也会立刻跟着变（见 BattleField）。
 func tower_mult() -> float:
 	return float(UnitData.HOUSE_STAGES[house_stage]["tower_mult"])
+
+
+## 塔加成百分比，给界面显示用，例如 +26
+func tower_bonus_percent() -> int:
+	return int(round((tower_mult() - 1.0) * 100.0))
 
 
 func house_name() -> String:
@@ -66,6 +69,12 @@ func next_house_cost() -> int:
 	if house_stage + 1 >= UnitData.HOUSE_STAGES.size():
 		return -1
 	return int(UnitData.HOUSE_STAGES[house_stage + 1]["cost"])
+
+
+func next_house_name() -> String:
+	if house_stage + 1 >= UnitData.HOUSE_STAGES.size():
+		return ""
+	return str(UnitData.HOUSE_STAGES[house_stage + 1]["name"])
 
 
 # --- 交易 ---
@@ -89,21 +98,23 @@ func buy_house_stage() -> bool:
 	return true
 
 
+## 买纸笔：只负责扣体悟。加纸笔由战斗层立刻给（一次性，关卡结束就没了）。
 func buy_ink_pack() -> bool:
 	var cost := int(UnitData.INK_PACK["cost"])
 	if insight < float(cost):
 		return false
 	insight -= float(cost)
-	ink_packs += 1
 	insight_changed.emit(insight)
-	packs_changed.emit(ink_packs)
 	save_state()
 	return true
 
 
-## 本场开局的额外纸笔
-func ink_bonus() -> int:
-	return ink_packs * int(UnitData.INK_PACK["bonus"])
+func ink_pack_cost() -> int:
+	return int(UnitData.INK_PACK["cost"])
+
+
+func ink_pack_bonus() -> int:
+	return int(UnitData.INK_PACK["bonus"])
 
 
 # --- 关卡进度 ---
@@ -125,7 +136,6 @@ func save_state() -> void:
 	var data := {
 		"insight": insight,
 		"house_stage": house_stage,
-		"ink_packs": ink_packs,
 		"cleared_count": cleared_count,
 		"last_seen": last_seen,
 	}
@@ -151,7 +161,6 @@ func load_state() -> void:
 	var data: Dictionary = parsed
 	insight = float(data.get("insight", 0.0))
 	house_stage = clampi(int(data.get("house_stage", 0)), 0, UnitData.HOUSE_STAGES.size() - 1)
-	ink_packs = int(data.get("ink_packs", 0))
 	cleared_count = clampi(int(data.get("cleared_count", 0)), 0, UnitData.BASE_DATA["levels"].size())
 	last_seen = int(data.get("last_seen", 0))
 
@@ -170,10 +179,8 @@ func _apply_offline_gain() -> void:
 func reset_progress() -> void:
 	insight = 0.0
 	house_stage = 0
-	ink_packs = 0
 	cleared_count = 0
 	last_seen = 0
 	save_state()
 	insight_changed.emit(insight)
 	house_changed.emit(house_stage)
-	packs_changed.emit(ink_packs)

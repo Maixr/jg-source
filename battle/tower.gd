@@ -52,6 +52,13 @@ func upgrade(mult: float) -> bool:
 	return true
 
 
+## 房屋重建后重新套用倍率：攻击/血量立刻变强，当前血量按比例保留
+func reapply_mult(mult: float) -> void:
+	var ratio := hp / max_hp if max_hp > 0.0 else 1.0
+	_refresh(mult)
+	hp = max_hp * ratio
+
+
 func can_block() -> bool:
 	return block_capacity > 0 and engaged.size() < block_capacity
 

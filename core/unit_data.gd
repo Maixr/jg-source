@@ -16,7 +16,7 @@ const ORANGE := Color("e08a3c")
 const BG := Color("2a231b")
 
 # --- 版本号：每次发试玩包改这里 ---
-const GAME_VERSION := "v0.1.2"
+const GAME_VERSION := "v0.1.3"
 const GAME_CHANNEL := "试玩版"
 const GAME_BUILD := "2026-10-28"
 
@@ -143,30 +143,32 @@ const BASE_DATA := {
 			"name": "第一页 · 字从门缝里跑出来",
 			"rule_name": "教学",
 			"rule": "只有「躁」在乱跑。先把纸盾放到路上挡住它，后面再补墨矢。",
-			"start_ink": 20,
+			"start_ink": 16,
 			"base_hp": 12,
 			"ink_mult": 1.0,
-			"enemy_hp_mult": 1.00,
+			"enemy_hp_mult": 1.35,
 			"enemy_speed_mult": 1.00,
 			"waves": [
-				{"at": 4.0, "spawns": [{"type": "zao", "count": 3, "gap": 2.4}]},
-				{"at": 22.0, "spawns": [{"type": "zao", "count": 4, "gap": 1.9}]},
-				{"at": 46.0, "spawns": [{"type": "zao", "count": 6, "gap": 1.5}]},
+				{"at": 4.0, "spawns": [{"type": "zao", "count": 5, "gap": 2.0}]},
+				{"at": 22.0, "spawns": [{"type": "zao", "count": 8, "gap": 1.6}]},
+				{"at": 46.0, "spawns": [{"type": "zao", "count": 12, "gap": 1.1}]},
+				{"at": 70.0, "spawns": [{"type": "zao", "count": 12, "gap": 1.0}]},
 			],
 		},
 		{
 			"name": "第二页 · 走不出的雾",
 			"rule_name": "重字登场",
 			"rule": "「迷」很慢很硬，还带 2 点护甲——盾挡住它，让墨刃慢慢磨。",
-			"start_ink": 20,
+			"start_ink": 18,
 			"base_hp": 12,
 			"ink_mult": 1.0,
-			"enemy_hp_mult": 1.00,
+			"enemy_hp_mult": 1.48,
 			"enemy_speed_mult": 1.00,
 			"waves": [
-				{"at": 4.0, "spawns": [{"type": "zao", "count": 4, "gap": 1.7}]},
-				{"at": 24.0, "spawns": [{"type": "mi", "count": 2, "gap": 3.2}, {"type": "zao", "count": 3, "gap": 1.6}]},
-				{"at": 54.0, "spawns": [{"type": "mi", "count": 3, "gap": 2.6}]},
+				{"at": 4.0, "spawns": [{"type": "zao", "count": 5, "gap": 1.5}]},
+				{"at": 24.0, "spawns": [{"type": "mi", "count": 2, "gap": 3.0}, {"type": "zao", "count": 4, "gap": 1.4}]},
+				{"at": 54.0, "spawns": [{"type": "mi", "count": 4, "gap": 2.4}]},
+				{"at": 80.0, "spawns": [{"type": "zao", "count": 5, "gap": 1.1}]},
 			],
 		},
 		{
@@ -176,7 +178,7 @@ const BASE_DATA := {
 			"start_ink": 22,
 			"base_hp": 12,
 			"ink_mult": 1.0,
-			"enemy_hp_mult": 1.00,
+			"enemy_hp_mult": 1.55,
 			"enemy_speed_mult": 1.00,
 			"waves": [
 				{"at": 4.0, "spawns": [{"type": "zao", "count": 4, "gap": 1.5}]},
@@ -192,7 +194,7 @@ const BASE_DATA := {
 			"start_ink": 22,
 			"base_hp": 12,
 			"ink_mult": 0.90,
-			"enemy_hp_mult": 1.05,
+			"enemy_hp_mult": 1.28,
 			"enemy_speed_mult": 1.00,
 			"waves": [
 				{"at": 4.0, "spawns": [{"type": "zao", "count": 5, "gap": 1.4}]},
@@ -208,7 +210,7 @@ const BASE_DATA := {
 			"start_ink": 24,
 			"base_hp": 15,
 			"ink_mult": 1.15,
-			"enemy_hp_mult": 0.95,
+			"enemy_hp_mult": 1.00,
 			"enemy_speed_mult": 1.05,
 			"waves": [
 				{"at": 4.0, "spawns": [{"type": "zao", "count": 6, "gap": 1.3}]},
@@ -224,14 +226,15 @@ const BASE_DATA := {
 # --- 养成 ---
 const HOUSE_STAGES := [
 	{"name": "废墟", "cost": 0, "tower_mult": 1.00, "read_mult": 1.00},
-	{"name": "清出空地", "cost": 30, "tower_mult": 1.06, "read_mult": 1.25},
-	{"name": "修好屋顶", "cost": 70, "tower_mult": 1.12, "read_mult": 1.55},
-	{"name": "补上书架", "cost": 140, "tower_mult": 1.20, "read_mult": 1.90},
-	{"name": "重新点亮", "cost": 260, "tower_mult": 1.30, "read_mult": 2.40},
+	{"name": "清出空地", "cost": 40, "tower_mult": 1.12, "read_mult": 1.30},
+	{"name": "修好屋顶", "cost": 90, "tower_mult": 1.26, "read_mult": 1.65},
+	{"name": "补上书架", "cost": 170, "tower_mult": 1.42, "read_mult": 2.05},
+	{"name": "重新点亮", "cost": 300, "tower_mult": 1.60, "read_mult": 2.60},
 ]
 
 const READ_BASE := 0.10
-const INK_PACK := {"cost": 20, "bonus": 6}
+## 买纸笔：一次性的，立刻加进当前这一关，关卡结束就没了
+const INK_PACK := {"cost": 25, "bonus": 20}
 const OFFLINE_CAP := 8.0 * 3600.0
 
 
