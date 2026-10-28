@@ -1,0 +1,20 @@
+# Godot 4+ 忽略项
+.godot/
+/android/
+export_presets.cfg.bak
+
+# 导出产物（本项目实际输出在 D:\jg-build，这里只是兜底）
+/build/
+*.pck
+*.exe
+*.zip
+*.apk
+*.aab
+
+# 编辑器/系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*~
