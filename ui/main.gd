@@ -32,6 +32,7 @@ var level_panel: Control
 var level_buttons: Array = []
 
 var result_panel: Control
+var confirm_panel: Control
 var result_title: Label
 var result_detail: Label
 
@@ -51,11 +52,16 @@ func _ready() -> void:
 	_build_drawer()
 	_build_level_select()
 	_build_result()
+	_build_confirm_panel()
 	GS.insight_changed.connect(_on_economy_changed)
 	GS.house_changed.connect(_on_economy_changed)
 	# 平衡自检：设置 JG_BALANCE=1 后无头启动会跑完五关并打印结果然后退出
 	if OS.has_environment("JG_BALANCE"):
 		_run_balance_check.call_deferred()
+		return
+	# 一次性自检：吸附对齐 + 清空存档（会还原存档）
+	if OS.has_environment("JG_SELFTEST"):
+		_run_placement_selftest.call_deferred()
 		return
 	_show_level_select()
 	_refresh_hud()
@@ -336,6 +342,65 @@ func _build_level_select() -> void:
 	hint.add_theme_font_size_override("font_size", 14)
 	col.add_child(hint)
 
+	# 清空存档（点了还要再确认一次）
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0.0, 8.0)
+	col.add_child(spacer)
+
+	var clear_btn := _make_button("清空存档")
+	clear_btn.custom_minimum_size = Vector2(160.0, 40.0)
+	clear_btn.add_theme_color_override("font_color", Color(0.78, 0.55, 0.5))
+	clear_btn.pressed.connect(_on_clear_requested)
+	col.add_child(clear_btn)
+
+
+## 二次确认弹窗：清空存档不可撤销，必须再点一次"确定清空"
+func _build_confirm_panel() -> void:
+	confirm_panel = ColorRect.new()
+	confirm_panel.name = "ClearConfirm"
+	confirm_panel.color = Color(0.05, 0.04, 0.03, 0.92)
+	confirm_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	confirm_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	confirm_panel.visible = false
+	add_child(confirm_panel)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	confirm_panel.add_child(center)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 16)
+	center.add_child(col)
+
+	var title := _make_label("确定清空存档？")
+	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_color_override("font_color", Color(0.85, 0.5, 0.45))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+
+	var desc := _make_label(
+		"情感体悟、小屋重建进度、已通关的关卡都会清零，\n这个操作没法撤销。"
+	)
+	desc.add_theme_color_override("font_color", Color(0.78, 0.74, 0.68))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.add_theme_font_size_override("font_size", 16)
+	col.add_child(desc)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 16)
+	col.add_child(row)
+
+	var yes := _make_button("确定清空")
+	yes.custom_minimum_size = Vector2(150.0, 46.0)
+	yes.pressed.connect(_on_clear_confirmed)
+	row.add_child(yes)
+
+	var no := _make_button("取消")
+	no.custom_minimum_size = Vector2(150.0, 46.0)
+	no.pressed.connect(_on_clear_cancelled)
+	row.add_child(no)
+
 
 func _build_result() -> void:
 	result_panel = ColorRect.new()
@@ -503,6 +568,25 @@ func _on_selection_changed(tower: Tower) -> void:
 	_refresh_hud()
 
 
+# --- 清空存档 ---
+
+func _on_clear_requested() -> void:
+	confirm_panel.visible = true
+
+
+func _on_clear_cancelled() -> void:
+	confirm_panel.visible = false
+
+
+func _on_clear_confirmed() -> void:
+	confirm_panel.visible = false
+	GS.reset_progress()
+	# 回到第一关、进度归零的状态
+	_show_level_select()
+	_refresh_drawer()
+	result_panel.visible = false
+
+
 func _on_economy_changed(_value: Variant) -> void:
 	_refresh_hud()
 	_refresh_drawer()
@@ -598,6 +682,47 @@ func _run_balance_check() -> void:
 			])
 	GS.house_stage = saved_stage
 	print("=== 自检结束 ===")
+	get_tree().quit()
+
+
+## 一次性自检：吸附对齐 + 清空存档。跑完会还原存档，不动玩家进度。
+## 用法：设置 JG_SELFTEST=1 后无头启动。
+func _run_placement_selftest() -> void:
+	var save_path := "user://jg_save.json"
+	var backup := ""
+	if FileAccess.file_exists(save_path):
+		backup = FileAccess.get_file_as_string(save_path)
+
+	_start_level(0)
+	field.ink = 100.0
+	field.set_pending("shield")
+	var cursor := Vector2(320.0, 300.0)  # 落在两个格子(292 / 336)之间
+	var ok: bool = field.try_place(cursor)
+	var landed := Vector2(-1.0, -1.0)
+	if not field.towers.is_empty():
+		landed = (field.towers[0] as Tower).pos
+	var aligned := false
+	for c in field.ground_cells:
+		if (c as Vector2).is_equal_approx(landed):
+			aligned = true
+	print("SELFTEST placement ok=%s cursor=%s landed=%s on_cell=%s" % [
+		str(ok), str(cursor), str(landed), str(aligned)
+	])
+
+	var before_cleared: int = GS.cleared_count
+	var before_insight: int = int(GS.insight)
+	_on_clear_confirmed()
+	print("SELFTEST clear before(cleared=%d insight=%d) after(cleared=%d insight=%d)" % [
+		before_cleared, before_insight, GS.cleared_count, int(GS.insight)
+	])
+
+	if backup != "":
+		var f := FileAccess.open(save_path, FileAccess.WRITE)
+		if f != null:
+			f.store_string(backup)
+			f.close()
+	GS.load_state()
+	print("SELFTEST restored cleared=%d insight=%d" % [GS.cleared_count, int(GS.insight)])
 	get_tree().quit()
 
 

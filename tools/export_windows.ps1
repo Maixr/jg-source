@@ -13,8 +13,8 @@ $godot   = 'D:\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.e
 $outDir  = 'D:\jg-build\win'
 $preset  = 'Windows'
 $stage   = Join-Path $env:TEMP 'jg_export_stage'
-$exeName = '情感体悟-v0.1.3.exe'
-$zipPath = 'D:\jg-build\情感体悟-v0.1.3-win64.zip'
+$exeName = '情感体悟-v0.1.4.exe'
+$zipPath = 'D:\jg-build\情感体悟-v0.1.4-win64.zip'
 $utf8bom = New-Object System.Text.UTF8Encoding($true)
 
 if (-not (Test-Path $godot))   { throw "找不到 Godot：$godot" }

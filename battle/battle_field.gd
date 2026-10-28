@@ -202,11 +202,17 @@ func tower_cost(tower_id: String) -> int:
 func try_place(at: Vector2) -> bool:
 	if pending_tower.is_empty() or not running:
 		return false
-	var err := placement_error(pending_tower, at)
-	if not err.is_empty():
-		_flash_text(at, err, Color("d9573f"))
+	var kind := UnitData.tower_deploy(pending_tower)
+	var cell: Variant = _snap_cell(at, kind)
+	if cell == null:
+		var hint := "地面分身要放在路上的金色踏脚处" if kind == "ground" else "高台分身要放在路旁的绿色格子上"
+		_flash_text(at, hint, Color("d9573f"))
 		return false
-	if not _place_exact(pending_tower, at):
+	var err := placement_error(pending_tower, cell)
+	if not err.is_empty():
+		_flash_text(cell, err, Color("d9573f"))
+		return false
+	if not _place_exact(pending_tower, cell):
 		return false
 	if ink < float(tower_cost(pending_tower)):
 		pending_tower = ""
@@ -214,24 +220,24 @@ func try_place(at: Vector2) -> bool:
 	return true
 
 
-## 放置是否合法。返回空串 = 可以放；否则是给玩家看的原因。
-## 放置不吸附网格，直接落在光标位置，只检查「在路面上 / 在路旁 / 别重叠」。
-func placement_error(tower_id: String, at: Vector2) -> String:
-	if at.x < 12.0 or at.x > 1204.0 or at.y < 62.0 or at.y > 620.0:
-		return "这个位置在可放置区域外"
-	var kind := UnitData.tower_deploy(tower_id)
-	var d := _dist_to_path(at)
-	if kind == "ground":
-		if d > 26.0:
-			return "地面分身只能放在路面上"
-	else:
-		if d < 30.0:
-			return "高台分身要放在路旁，不能压在路面上"
-		if d > 134.0:
-			return "离路线太远了"
-	for t in towers:
-		if (t as Tower).pos.distance_to(at) < 28.0:
-			return "离已有分身太近"
+## 把光标位置吸附到最近的同类格子上（那就是塔最终落点，保证和格子对齐）。
+## 超出吸附半径返回 null，避免光标在远处时塔"飞"到别的格子上。
+func _snap_cell(at: Vector2, kind: String) -> Variant:
+	var list: Array = ground_cells if kind == "ground" else high_cells
+	var best: Variant = null
+	var best_d := UnitData.GRID_STEP * 0.85
+	for c in list:
+		var d := (c as Vector2).distance_to(at)
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
+
+
+## 这一格能不能放。返回空串 = 可以放；否则是给玩家看的原因。
+func placement_error(tower_id: String, cell: Vector2) -> String:
+	if _tower_at(cell) != null:
+		return "这一格已经有分身了"
 	if ink < float(tower_cost(tower_id)):
 		return "纸笔不够"
 	return ""
@@ -775,17 +781,34 @@ func _draw_base() -> void:
 
 
 func _draw_pending_hint() -> void:
-	# 预览就在光标位置，不吸附网格；放不了时在圈下写明原因
+	# 预览画在「吸附到的格子」上，和最终落点完全一致，这样不会出现视觉偏移。
+	# 格子会被高亮成一个方框，圈住的就是塔将占据的位置。
+	var kind := UnitData.tower_deploy(pending_tower)
 	var mouse := get_local_mouse_position()
-	var err := placement_error(pending_tower, mouse)
+	var cell: Variant = _snap_cell(mouse, kind)
+	var anchor: Vector2 = mouse if cell == null else cell
+	var err := ""
+	if cell == null:
+		err = "靠近格子才能放"
+	else:
+		err = placement_error(pending_tower, anchor)
 	var ok := err.is_empty()
 	var col := Color(0.95, 0.85, 0.5, 0.95) if ok else Color(0.85, 0.32, 0.26, 0.95)
+
+	if cell != null:
+		# 高亮整格：框内就是塔的实际占地
+		var half := 17.0
+		draw_rect(Rect2(anchor - Vector2(half, half), Vector2(half, half) * 2.0),
+			Color(col.r, col.g, col.b, 0.16), true)
+		draw_rect(Rect2(anchor - Vector2(half, half), Vector2(half, half) * 2.0),
+			col, false, 2.0)
+
 	var stats := UnitData.tower_stats(pending_tower, 1, GS.tower_mult())
-	draw_circle(mouse, 16.0, Color(col.r, col.g, col.b, 0.18))
-	draw_arc(mouse, 16.0, 0.0, TAU, 24, col, 2.0, true)
-	draw_arc(mouse, float(stats["range"]), 0.0, TAU, 48, Color(col.r, col.g, col.b, 0.22), 1.5, true)
+	draw_circle(anchor, 11.0, Color(col.r, col.g, col.b, 0.22))
+	draw_arc(anchor, 11.0, 0.0, TAU, 24, col, 2.0, true)
+	draw_arc(anchor, float(stats["range"]), 0.0, TAU, 48, Color(col.r, col.g, col.b, 0.22), 1.5, true)
 	if not ok:
-		_draw_centered(err, mouse + Vector2(0.0, 36.0), 13, col)
+		_draw_centered(err, anchor + Vector2(0.0, 38.0), 13, col)
 
 
 ## 不限距离，找最近的格子（幽灵预览用）
