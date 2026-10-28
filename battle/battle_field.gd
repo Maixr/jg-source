@@ -14,6 +14,8 @@ signal battle_finished(win: bool, insight_gained: float)
 const DESIGN := Vector2(1280.0, 720.0)
 const PATH_WIDTH := 46.0
 const INK_CAP := 99.0
+## 移除分身时返还投入纸笔的比例（低于 1，避免放了又拆刷纸笔）
+const REFUND_RATE := 0.6
 const LEASH := 1.35
 
 var level: Dictionary = {}
@@ -252,9 +254,38 @@ func _place_exact(tower_id: String, cell: Vector2) -> bool:
 		return false
 	var t := Tower.new()
 	t.setup(tower_id, cell, GS.tower_mult())
+	t.invested = cost
 	towers.append(t)
 	ink -= float(cost)
 	_flash_text(cell, "-%d 纸笔" % cost, UnitData.ORANGE)
+	queue_redraw()
+	return true
+
+
+## 移除选中的分身，返还一部分投入的纸笔
+func remove_selected() -> bool:
+	if selected == null or not running or finished:
+		return false
+	return remove_tower(selected)
+
+
+## 移除指定分身：返还投入的 REFUND_RATE，挡住的敌人会被放走
+func remove_tower(tw: Tower) -> bool:
+	if tw == null or not towers.has(tw):
+		return false
+	var refund := int(round(float(tw.invested) * REFUND_RATE))
+	ink = minf(INK_CAP, ink + float(refund))
+	# 它挡着的敌人失去目标，继续往前走
+	for e in enemies:
+		var en := e as Enemy
+		if en.target == tw:
+			en.target = null
+	towers.erase(tw)
+	if selected == tw:
+		selected = null
+		selection_changed.emit(null)
+	_flash_text(tw.pos, "退还 %d 纸笔" % refund, UnitData.LEAF)
+	stats_changed.emit()
 	queue_redraw()
 	return true
 
@@ -277,6 +308,7 @@ func try_upgrade(tw: Tower) -> bool:
 	if not tw.upgrade(GS.tower_mult()):
 		return false
 	ink -= float(cost)
+	tw.invested += cost
 	_flash_text(tw.pos, "升到 %d 级" % tw.level, UnitData.LEAF)
 	stats_changed.emit()
 	queue_redraw()

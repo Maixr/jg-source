@@ -15,6 +15,9 @@ var cleared_count := 0
 var last_seen := 0
 
 var _autosave := 0.0
+## 跑无头自检/平衡模拟时置 false：模拟会调用 mark_cleared / add_insight，
+## 如果不拦就会把模拟结果写进玩家真实存档。
+var save_enabled := true
 
 
 func _ready() -> void:
@@ -132,6 +135,8 @@ func mark_cleared(index: int) -> void:
 # --- 存档 ---
 
 func save_state() -> void:
+	if not save_enabled:
+		return
 	last_seen = int(Time.get_unix_time_from_system())
 	var data := {
 		"insight": insight,

@@ -19,6 +19,8 @@ var glyph := ""
 var cooldown := 0.0
 var flash := 0.0
 var engaged: Array = []
+## 累计投入的纸笔（放置 + 升级），移除时按比例返还
+var invested := 0
 
 
 func setup(tower_id: String, cell: Vector2, mult: float) -> void:

@@ -16,6 +16,7 @@ var lbl_hp: Label
 var lbl_wave: Label
 var tower_buttons := {}
 var btn_upgrade: Button
+var btn_remove: Button
 var btn_speed: Button
 var btn_pause: Button
 var btn_back: Button
@@ -213,6 +214,13 @@ func _build_bottom_bar() -> void:
 	btn_upgrade.pressed.connect(_on_upgrade_pressed)
 	btn_upgrade.disabled = true
 	row.add_child(btn_upgrade)
+
+	btn_remove = _make_button("移除")
+	btn_remove.custom_minimum_size = Vector2(126.0, 62.0)
+	btn_remove.add_theme_color_override("font_color", Color(0.86, 0.62, 0.55))
+	btn_remove.pressed.connect(_on_remove_pressed)
+	btn_remove.disabled = true
+	row.add_child(btn_remove)
 
 
 func _build_drawer() -> void:
@@ -501,6 +509,11 @@ func _on_upgrade_pressed() -> void:
 	_refresh_hud()
 
 
+func _on_remove_pressed() -> void:
+	field.remove_selected()
+	_refresh_hud()
+
+
 func _toggle_pause() -> void:
 	# 之前这里有个逻辑反了的提前返回：暂停时 running=false，
 	# 反而被 `if not field.running ... return` 挡住，导致暂停后点不动。
@@ -622,9 +635,15 @@ func _refresh_hud() -> void:
 		else:
 			btn_upgrade.text = "升级 %d → %d 级（%d）" % [field.selected.level, field.selected.level + 1, next_cost]
 			btn_upgrade.disabled = field.ink < float(next_cost)
+		# 移除：显示能退多少纸笔
+		var refund := int(round(float(field.selected.invested) * BattleField.REFUND_RATE))
+		btn_remove.text = "移除（退 %d）" % refund
+		btn_remove.disabled = not field.running or field.finished
 	else:
 		btn_upgrade.text = "选中分身可升级"
 		btn_upgrade.disabled = true
+		btn_remove.text = "移除"
+		btn_remove.disabled = true
 
 	btn_pause.text = "暂停" if field.running else "继续"
 	btn_speed.text = "x2" if field.speed_scale > 1.5 else "x1"
@@ -666,7 +685,9 @@ func _refresh_drawer() -> void:
 ## 调整五关难度就用它验证，不用打开编辑器。
 func _run_balance_check() -> void:
 	var plan := dev_build_plan()
-	# 必须按「废墟」阶段（无房屋加成）来算，这是玩家的下限；事后还原免得改坏存档
+	# 模拟会调用 mark_cleared / add_insight，必须关掉存档写入，否则污染玩家存档
+	GS.save_enabled = false
+	# 自检必须在「废墟」阶段跑，算是玩家的下限；事后还原，免得把存档改坏
 	var saved_stage: int = GS.house_stage
 	GS.house_stage = 0
 	print("=== 平衡自检（小屋=废墟，无房屋加成）===")
@@ -692,6 +713,7 @@ func _run_placement_selftest() -> void:
 	var backup := ""
 	if FileAccess.file_exists(save_path):
 		backup = FileAccess.get_file_as_string(save_path)
+	GS.save_enabled = false
 
 	_start_level(0)
 	field.ink = 100.0
@@ -707,6 +729,17 @@ func _run_placement_selftest() -> void:
 			aligned = true
 	print("SELFTEST placement ok=%s cursor=%s landed=%s on_cell=%s" % [
 		str(ok), str(cursor), str(landed), str(aligned)
+	])
+
+	# 移除返还测试
+	var t1: Tower = field.towers[0]
+	var invested: int = t1.invested
+	field.ink = 0.0
+	field.selected = t1
+	var removed: bool = field.remove_selected()
+	var expected := int(round(float(invested) * BattleField.REFUND_RATE))
+	print("SELFTEST remove ok=%s invested=%d refunded=%d expected=%d towers_left=%d" % [
+		str(removed), invested, int(field.ink), expected, field.towers.size()
 	])
 
 	var before_cleared: int = GS.cleared_count

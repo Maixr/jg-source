@@ -16,7 +16,7 @@ const ORANGE := Color("e08a3c")
 const BG := Color("2a231b")
 
 # --- 版本号：每次发试玩包改这里 ---
-const GAME_VERSION := "v0.1.4"
+const GAME_VERSION := "v0.1.5"
 const GAME_CHANNEL := "试玩版"
 const GAME_BUILD := "2026-10-28"
 
@@ -92,7 +92,7 @@ const TOWERS := {
 	},
 	"blade": {
 		"name": "墨刃", "glyph": "刃", "kind": "melee", "deploy": "ground",
-		"cost": 16, "block": 2, "color": Color("c0392b"),
+		"cost": 16, "block": 3, "color": Color("c0392b"),
 		"upgrade_costs": [14, 22],
 		"levels": [
 			{"hp": 300.0, "atk": 16.0, "range": 84.0, "interval": 1.00},
