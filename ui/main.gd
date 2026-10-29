@@ -10,10 +10,11 @@ const DRAWER_W := 430.0
 var field: BattleField
 
 var lbl_ink: Label
+var lbl_progress: Label
+var progress_bar: ProgressBar
 var lbl_insight: Label
 var lbl_stage: Label
 var lbl_hp: Label
-var lbl_wave: Label
 var tower_buttons := {}
 var btn_upgrade: Button
 var btn_remove: Button
@@ -54,6 +55,8 @@ func _ready() -> void:
 	_build_level_select()
 	_build_result()
 	_build_confirm_panel()
+	_build_enemy_card()
+	_build_settings_panel()
 	GS.insight_changed.connect(_on_economy_changed)
 	GS.house_changed.connect(_on_economy_changed)
 	# 平衡自检：设置 JG_BALANCE=1 后无头启动会跑完五关并打印结果然后退出
@@ -61,6 +64,25 @@ func _ready() -> void:
 		_run_balance_check.call_deferred()
 		return
 	# 一次性自检：吸附对齐 + 清空存档（会还原存档）
+	if OS.has_environment("JG_GRIDCHECK"):
+		_run_grid_check.call_deferred()
+		return
+	# 调试用：JG_DEV_LEVEL=3 直接进第 3 关并摆好一套塔，方便看画面
+	if OS.has_environment("JG_WININFO"):
+		var w := get_window()
+		print("WININFO screen=", DisplayServer.screen_get_size(), " dpi_scale=", DisplayServer.screen_get_scale())
+		print("WININFO window_size=", w.size, " pos=", w.position)
+		print("WININFO visible_rect=", get_viewport().get_visible_rect().size)
+		print("WININFO cs_size=", w.content_scale_size, " mode=", w.content_scale_mode, " aspect=", w.content_scale_aspect, " factor=", w.content_scale_factor)
+		get_tree().quit()
+		return
+	# 调试用：进指定关卡 + 可选自动截图（JG_SHOT=输出路径）
+	if OS.has_environment("JG_DEV_LEVEL"):
+		var dev_lv: int = clampi(int(OS.get_environment("JG_DEV_LEVEL")) - 1, 0, 4)
+		dev_start(dev_lv)
+		if OS.has_environment("JG_SHOT"):
+			_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
+		return
 	if OS.has_environment("JG_SELFTEST"):
 		_run_placement_selftest.call_deferred()
 		return
@@ -127,6 +149,8 @@ func _build_field() -> void:
 	field.stats_changed.connect(_refresh_hud)
 	field.selection_changed.connect(_on_selection_changed)
 	field.battle_finished.connect(_on_battle_finished)
+	field.progress_changed.connect(_on_progress_changed)
+	field.new_enemy_seen.connect(_on_new_enemy_seen)
 
 
 func _build_top_bar() -> void:
@@ -145,8 +169,6 @@ func _build_top_bar() -> void:
 	row.add_theme_constant_override("separation", 22)
 	bar.add_child(row)
 
-	lbl_ink = _make_label("纸笔 0")
-	row.add_child(lbl_ink)
 	lbl_insight = _make_label("体悟 0")
 	lbl_insight.add_theme_color_override("font_color", UnitData.PINK)
 	row.add_child(lbl_insight)
@@ -155,8 +177,6 @@ func _build_top_bar() -> void:
 	row.add_child(lbl_stage)
 	lbl_hp = _make_label("剧情完整度 12/12")
 	row.add_child(lbl_hp)
-	lbl_wave = _make_label("剩余 0")
-	row.add_child(lbl_wave)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -195,6 +215,29 @@ func _build_bottom_bar() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	bar.add_child(row)
+
+	# 纸笔 + 打怪进度：放在操作栏左侧，视线和手都不用来回跑
+	var info := VBoxContainer.new()
+	info.add_theme_constant_override("separation", 2)
+	info.custom_minimum_size = Vector2(186.0, 0.0)
+	row.add_child(info)
+
+	lbl_ink = _make_label("纸笔 0")
+	lbl_ink.add_theme_font_size_override("font_size", 22)
+	lbl_ink.add_theme_color_override("font_color", UnitData.ORANGE)
+	info.add_child(lbl_ink)
+
+	lbl_progress = _make_label("击杀 0 / 0")
+	lbl_progress.add_theme_font_size_override("font_size", 15)
+	lbl_progress.add_theme_color_override("font_color", Color(0.78, 0.75, 0.68))
+	info.add_child(lbl_progress)
+
+	progress_bar = ProgressBar.new()
+	progress_bar.custom_minimum_size = Vector2(180.0, 10.0)
+	progress_bar.show_percentage = false
+	progress_bar.max_value = 1.0
+	progress_bar.value = 0.0
+	info.add_child(progress_bar)
 
 	for id in UnitData.TOWER_ORDER:
 		var def: Dictionary = UnitData.TOWERS[id]
@@ -359,6 +402,12 @@ func _build_level_select() -> void:
 	clear_btn.custom_minimum_size = Vector2(160.0, 40.0)
 	clear_btn.add_theme_color_override("font_color", Color(0.78, 0.55, 0.5))
 	clear_btn.pressed.connect(_on_clear_requested)
+	clear_btn.add_theme_color_override("font_color", Color(0.78, 0.55, 0.5))
+
+	var key_btn := _make_button("按键设置")
+	key_btn.custom_minimum_size = Vector2(160.0, 40.0)
+	key_btn.pressed.connect(_open_settings)
+	col.add_child(key_btn)
 	col.add_child(clear_btn)
 
 
@@ -605,18 +654,216 @@ func _on_economy_changed(_value: Variant) -> void:
 	_refresh_drawer()
 
 
+# --- 打怪进度 ---
+
+func _on_progress_changed(killed: int, total: int) -> void:
+	if lbl_progress == null:
+		return
+	lbl_progress.text = "击杀 %d / %d" % [killed, total]
+	progress_bar.max_value = maxf(1.0, float(total))
+	progress_bar.value = float(killed)
+
+
+# --- 新敌人介绍弹窗（右上角，可关闭）---
+
+var enemy_card: Control
+var enemy_card_title: Label
+var enemy_card_body: Label
+
+
+func _build_enemy_card() -> void:
+	enemy_card = PanelContainer.new()
+	enemy_card.name = "EnemyCard"
+	enemy_card.add_theme_stylebox_override("panel", _panel_style(0.97))
+	enemy_card.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	enemy_card.offset_left = -440.0
+	enemy_card.offset_top = 74.0
+	enemy_card.offset_right = -14.0
+	enemy_card.offset_bottom = 74.0
+	enemy_card.custom_minimum_size = Vector2(426.0, 0.0)
+	enemy_card.visible = false
+	enemy_card.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(enemy_card)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	enemy_card.add_child(col)
+
+	enemy_card_title = _make_label("新的字")
+	enemy_card_title.add_theme_font_size_override("font_size", 22)
+	enemy_card_title.add_theme_color_override("font_color", UnitData.PINK)
+	enemy_card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	enemy_card_title.custom_minimum_size = Vector2(400.0, 0.0)
+	col.add_child(enemy_card_title)
+
+	enemy_card_body = _make_label("")
+	enemy_card_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	enemy_card_body.custom_minimum_size = Vector2(400.0, 0.0)
+	enemy_card_body.add_theme_color_override("font_color", Color(0.82, 0.79, 0.72))
+	enemy_card_body.add_theme_font_size_override("font_size", 15)
+	col.add_child(enemy_card_body)
+
+	var close := _make_button("知道了")
+	close.pressed.connect(func(): enemy_card.visible = false)
+	col.add_child(close)
+
+
+func _on_new_enemy_seen(enemy_id: String) -> void:
+	var def: Dictionary = UnitData.ENEMIES.get(enemy_id, {})
+	if def.is_empty() or enemy_card == null:
+		return
+	enemy_card_title.text = "出现了新的字：「%s」" % str(def["name"])
+	enemy_card_body.text = "%s\n生命 %d　　移动 %d　　护甲 %d" % [
+		str(def.get("info", "")), int(def["hp"]), int(def["speed"]), int(def["armor"])
+	]
+	enemy_card.visible = true
+
+
+# --- 快捷键（可在按键设置里改；设置存独立文件，清空存档不影响）---
+
+const BIND_ROWS := [
+	["pause", "暂停 / 继续"],
+	["speed", "切换 x1 / x2"],
+	["back", "返回书页"],
+	["upgrade", "升级选中的分身"],
+	["remove", "移除选中的分身"],
+]
+
+var settings_panel: Control
+var bind_buttons := {}
+var awaiting_action := ""
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k == null or not k.pressed or k.echo:
+		return
+
+	# 正在等待玩家按新键
+	if awaiting_action != "":
+		if k.keycode != KEY_ESCAPE:
+			GS.set_bind(awaiting_action, k.keycode)
+		awaiting_action = ""
+		_refresh_bind_buttons()
+		get_viewport().set_input_as_handled()
+		return
+
+	if k.keycode == GS.bind_key("pause"):
+		if not level_panel.visible and not result_panel.visible and not confirm_panel.visible:
+			_toggle_pause()
+			get_viewport().set_input_as_handled()
+	elif k.keycode == GS.bind_key("speed"):
+		if not level_panel.visible and not result_panel.visible:
+			_toggle_speed()
+			get_viewport().set_input_as_handled()
+	elif k.keycode == GS.bind_key("upgrade"):
+		if not level_panel.visible and not result_panel.visible:
+			_on_upgrade_pressed()
+			get_viewport().set_input_as_handled()
+	elif k.keycode == GS.bind_key("remove"):
+		if not level_panel.visible and not result_panel.visible:
+			_on_remove_pressed()
+			get_viewport().set_input_as_handled()
+	elif k.keycode >= KEY_1 and k.keycode <= KEY_4:
+		if not level_panel.visible and not result_panel.visible:
+			_on_tower_pressed(UnitData.TOWER_ORDER[k.keycode - KEY_1])
+			get_viewport().set_input_as_handled()
+	elif k.keycode == GS.bind_key("back"):
+		if not level_panel.visible:
+			_show_level_select()
+			get_viewport().set_input_as_handled()
+
+
+func _build_settings_panel() -> void:
+	settings_panel = ColorRect.new()
+	settings_panel.name = "KeySettings"
+	settings_panel.color = Color(0.05, 0.04, 0.03, 0.93)
+	settings_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	settings_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_panel.visible = false
+	add_child(settings_panel)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	settings_panel.add_child(center)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	center.add_child(col)
+
+	var title := _make_label("按键设置")
+	title.add_theme_font_size_override("font_size", 30)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+
+	var tip := _make_label("点右边的按钮，然后按下你想用的键（按 Esc 取消）")
+	tip.add_theme_color_override("font_color", Color(0.7, 0.67, 0.6))
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(tip)
+
+	for row_def in BIND_ROWS:
+		var action := str(row_def[0])
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 16)
+		col.add_child(hb)
+
+		var name_label := _make_label(str(row_def[1]))
+		name_label.custom_minimum_size = Vector2(220.0, 0.0)
+		hb.add_child(name_label)
+
+		var btn := _make_button("")
+		btn.custom_minimum_size = Vector2(170.0, 40.0)
+		btn.pressed.connect(_on_bind_pressed.bind(action))
+		hb.add_child(btn)
+		bind_buttons[action] = btn
+
+	var close := _make_button("关闭")
+	close.custom_minimum_size = Vector2(160.0, 44.0)
+	close.pressed.connect(_close_settings)
+	col.add_child(close)
+	_refresh_bind_buttons()
+
+
+func _on_bind_pressed(action: String) -> void:
+	awaiting_action = action
+	_refresh_bind_buttons()
+
+
+func _close_settings() -> void:
+	awaiting_action = ""
+	settings_panel.visible = false
+	_refresh_bind_buttons()
+
+
+func _refresh_bind_buttons() -> void:
+	for action in bind_buttons.keys():
+		var btn: Button = bind_buttons[action]
+		if awaiting_action == action:
+			btn.text = "按任意键…"
+		else:
+			btn.text = GS.key_label(GS.bind_key(str(action)))
+
+
+func _open_settings() -> void:
+	awaiting_action = ""
+	_refresh_bind_buttons()
+	settings_panel.visible = true
+
+
 # --- 刷新 ---
 
 func _refresh_hud() -> void:
 	if field == null:
 		return
 	lbl_ink.text = "纸笔 %d" % int(field.ink)
+	lbl_progress.text = "击杀 %d / %d" % [field.kill_count, field.total_enemies]
+	progress_bar.max_value = maxf(1.0, float(field.total_enemies))
+	progress_bar.value = float(field.kill_count)
 	lbl_insight.text = "体悟 %d" % int(GS.insight)
 	var levels: Array = UnitData.BASE_DATA["levels"]
 	if field.level_index >= 0 and field.level_index < levels.size():
 		lbl_stage.text = str(levels[field.level_index]["name"])
 	lbl_hp.text = "剧情完整度 %d/%d" % [maxi(field.base_hp, 0), field.base_max]
-	lbl_wave.text = "敌 %d" % field.enemies.size()
 
 	for id in tower_buttons:
 		var b: Button = tower_buttons[id]
@@ -684,7 +931,6 @@ func _refresh_drawer() -> void:
 ## 无头平衡自检：JG_BALANCE=1 启动后跑完全部关卡并打印结果。
 ## 调整五关难度就用它验证，不用打开编辑器。
 func _run_balance_check() -> void:
-	var plan := dev_build_plan()
 	# 模拟会调用 mark_cleared / add_insight，必须关掉存档写入，否则污染玩家存档
 	GS.save_enabled = false
 	# 自检必须在「废墟」阶段跑，算是玩家的下限；事后还原，免得把存档改坏
@@ -693,7 +939,8 @@ func _run_balance_check() -> void:
 	print("=== 平衡自检（小屋=废墟，无房屋加成）===")
 	for i in UnitData.BASE_DATA["levels"].size():
 		for mode in [0, 1]:
-			var r: Dictionary = field.dev_simulate(i, plan, 300.0, mode)
+			var level_plan: Array = dev_build_plan(i)
+			var r: Dictionary = field.dev_simulate(i, level_plan, 300.0, mode)
 			var lvsum := 0
 			for tw in field.towers:
 				lvsum += tw.level
@@ -703,6 +950,44 @@ func _run_balance_check() -> void:
 			])
 	GS.house_stage = saved_stage
 	print("=== 自检结束 ===")
+	get_tree().quit()
+
+
+## 调试截图：等渲染完成后把整帧存成 PNG（不依赖窗口管理，headless 也能用）
+func _run_shot(path: String) -> void:
+	await get_tree().create_timer(1.6).timeout
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	var err := img.save_png(path)
+	print("SHOT saved=", path, " err=", err, " size=", img.get_size())
+	get_tree().quit()
+
+
+## 格子几何自检：验证所有格子都落在格点上、且互不重叠。
+func _run_grid_check() -> void:
+	GS.save_enabled = false
+	var step := UnitData.GRID_STEP
+	for i in UnitData.BASE_DATA["levels"].size():
+		field.start_level(i)
+		field.stop_battle()
+		var g: Array = field.ground_cells
+		var h: Array = field.high_cells
+		var min_gg := INF
+		for a in range(g.size()):
+			for b in range(a + 1, g.size()):
+				min_gg = minf(min_gg, (g[a] as Vector2).distance_to(g[b]))
+		var min_gh := INF
+		for a in g:
+			for b in h:
+				min_gh = minf(min_gh, (a as Vector2).distance_to(b))
+		var offgrid := 0
+		for c in g + h:
+			var v := c as Vector2
+			var dx := absf(v.x - roundf(v.x / step) * step)
+			var dy := absf(v.y - roundf(v.y / step) * step)
+			if dx > 0.01 or dy > 0.01:
+				offgrid += 1
+		print("GRID L%d ground=%d high=%d min_ground_ground=%.1f min_ground_high=%.1f off_lattice=%d" % [i + 1, g.size(), h.size(), min_gg, min_gh, offgrid])
 	get_tree().quit()
 
 
@@ -718,7 +1003,11 @@ func _run_placement_selftest() -> void:
 	_start_level(0)
 	field.ink = 100.0
 	field.set_pending("shield")
-	var cursor := Vector2(320.0, 300.0)  # 落在两个格子(292 / 336)之间
+	if field.ground_cells.is_empty():
+		print("SELFTEST placement SKIP: 没有地面格")
+		get_tree().quit()
+		return
+	var cursor: Vector2 = field.ground_cells[0]
 	var ok: bool = field.try_place(cursor)
 	var landed := Vector2(-1.0, -1.0)
 	if not field.towers.is_empty():
@@ -759,27 +1048,50 @@ func _run_placement_selftest() -> void:
 	get_tree().quit()
 
 
-## 一套通用的测试布阵：锚点位置 + 塔种，模拟器会就近找对应类型的空格。
+## 测试布阵：按这一关的路线自动取锚点，保证换地图后依然能跑平衡自检。
 ## 顺序即建造顺序（模拟器按纸笔是否够来决定何时放下）。
-func dev_build_plan() -> Array:
-	return [
-		["shield", Vector2(320.0, 300.0)],
-		["bolt", Vector2(386.0, 300.0)],
-		["blade", Vector2(320.0, 392.0)],
-		["heal", Vector2(254.0, 300.0)],
-		["bolt", Vector2(540.0, 380.0)],
-		["shield", Vector2(756.0, 300.0)],
-		["bolt", Vector2(822.0, 300.0)],
-		["blade", Vector2(540.0, 444.0)],
-		["bolt", Vector2(978.0, 400.0)],
-		["shield", Vector2(1044.0, 520.0)],
-	]
+func dev_build_plan(index: int) -> Array:
+	var plan: Array = []
+	var routes: Array = UnitData.level_routes(index)
+	if routes.is_empty():
+		return plan
+	# 每条路线都摆一套，避免多路线关卡有一路完全没人管
+	for route in routes:
+		var pts: Array = (route as Dictionary).get("points", [])
+		if pts.size() < 2:
+			continue
+		var seglens: Array = []
+		var total := 0.0
+		for i in range(pts.size() - 1):
+			var d: float = (pts[i] as Vector2).distance_to(pts[i + 1])
+			seglens.append(d)
+			total += d
+		if total <= 1.0:
+			continue
+		var fracs := [0.10, 0.26, 0.42, 0.58, 0.74]
+		for f in fracs:
+			var target := total * float(f)
+			var acc := 0.0
+			var anchor: Vector2 = pts[0]
+			for i in range(seglens.size()):
+				var seg_len: float = seglens[i]
+				if acc + seg_len >= target:
+					anchor = (pts[i] as Vector2).lerp(pts[i + 1], (target - acc) / seg_len)
+					break
+				acc += seg_len
+			plan.append(["shield", anchor])
+			plan.append(["bolt", anchor])
+			plan.append(["heal", anchor])
+			plan.append(["blade", anchor])
+	return plan
 
 
 ## 直接开局并摆好整套测试布阵，方便快速看画面。
 func dev_start(index: int) -> void:
+	level_panel.visible = false
 	_start_level(index)
-	for spec in dev_build_plan():
+	var plan: Array = dev_build_plan(index)
+	for spec in plan:
 		field.ink = 90.0
 		var tid := str(spec[0])
 		var cell: Variant = field._nearest_free_cell(spec[1], UnitData.tower_deploy(tid))

@@ -7,12 +7,24 @@ signal insight_changed(value: float)
 signal house_changed(stage: int)
 
 const SAVE_PATH := "user://jg_save.json"
+## 设置单独放一个文件：清空存档不会把它一起清掉
+const SETTINGS_PATH := "user://settings.json"
 const AUTOSAVE_INTERVAL := 15.0
 
 var insight := 0.0
 var house_stage := 0
 var cleared_count := 0
 var last_seen := 0
+## 已经出现过（弹过介绍）的敌人类型
+var seen_enemies := {}
+## 键盘绑定：action -> Key 数字码
+var binds := {
+	"pause": KEY_SPACE,
+	"speed": KEY_F,
+	"back": KEY_ESCAPE,
+	"upgrade": KEY_U,
+	"remove": KEY_X,
+}
 
 var _autosave := 0.0
 ## 跑无头自检/平衡模拟时置 false：模拟会调用 mark_cleared / add_insight，
@@ -22,6 +34,7 @@ var save_enabled := true
 
 func _ready() -> void:
 	load_state()
+	load_binds()
 	_apply_offline_gain()
 	set_process(true)
 
@@ -142,6 +155,7 @@ func save_state() -> void:
 		"insight": insight,
 		"house_stage": house_stage,
 		"cleared_count": cleared_count,
+		"seen_enemies": seen_enemies,
 		"last_seen": last_seen,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -167,6 +181,9 @@ func load_state() -> void:
 	insight = float(data.get("insight", 0.0))
 	house_stage = clampi(int(data.get("house_stage", 0)), 0, UnitData.HOUSE_STAGES.size() - 1)
 	cleared_count = clampi(int(data.get("cleared_count", 0)), 0, UnitData.BASE_DATA["levels"].size())
+	var seen: Variant = data.get("seen_enemies", {})
+	if seen is Dictionary:
+		seen_enemies = seen
 	last_seen = int(data.get("last_seen", 0))
 
 
@@ -186,6 +203,53 @@ func reset_progress() -> void:
 	house_stage = 0
 	cleared_count = 0
 	last_seen = 0
+	seen_enemies = {}
 	save_state()
 	insight_changed.emit(insight)
 	house_changed.emit(house_stage)
+
+
+# --- 键位设置（写在单独的 settings.json，清空存档不会清掉）---
+
+func load_binds() -> void:
+	if not FileAccess.file_exists(SETTINGS_PATH):
+		return
+	var f := FileAccess.open(SETTINGS_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var text := f.get_as_text()
+	f.close()
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		return
+	var data: Dictionary = parsed
+	for action in binds.keys():
+		if data.has(action):
+			binds[action] = int(data[action])
+
+
+func save_binds() -> void:
+	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify(binds, "\t"))
+	f.close()
+
+
+func bind_key(action: String) -> int:
+	return int(binds.get(action, 0))
+
+
+func set_bind(action: String, keycode: int) -> void:
+	binds[action] = keycode
+	save_binds()
+
+
+static func key_label(keycode: int) -> String:
+	if keycode == 0:
+		return "未设置"
+	if keycode == KEY_SPACE:
+		return "空格"
+	if keycode == KEY_ESCAPE:
+		return "Esc"
+	return OS.get_keycode_string(keycode)

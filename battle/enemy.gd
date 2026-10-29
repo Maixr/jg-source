@@ -27,6 +27,12 @@ var alive := true
 var escaped := false
 var target: Tower = null
 
+## 远程单位边打边往前挪的节奏控制
+var advance_cd := 0.0      # 距离下次前挪还有多久
+var advance_left := 0.0    # 当前这次前挪还剩多久
+var advance_interval := 2.6  # 每隔多久往前挪一次
+var advance_window := 0.5    # 每次往前挪多久（秒）
+
 var _path: Array = []
 
 
