@@ -1,10 +1,11 @@
 extends Node
 
-## 全局进度：情感体悟、房屋重建、关卡解锁、离线收益。
+## 全局进度：情感体悟、书屋升级、关卡解锁、离线收益。
 ## 注册为 Autoload，名字 GameState。
 
 signal insight_changed(value: float)
-signal house_changed(stage: int)
+## 任何一条书屋升级变化（战斗层据此把新倍率套到已放的分身上）
+signal upgrades_changed()
 
 const SAVE_PATH := "user://jg_save.json"
 ## 设置单独放一个文件：清空存档不会把它一起清掉
@@ -12,7 +13,8 @@ const SETTINGS_PATH := "user://settings.json"
 const AUTOSAVE_INTERVAL := 15.0
 
 var insight := 0.0
-var house_stage := 0
+## 书屋升级：id -> 等级（id 见 UnitData.UPGRADE_ORDER）
+var upgrades := {}
 var cleared_count := 0
 var last_seen := 0
 ## 已经出现过（弹过介绍）的敌人类型
@@ -29,21 +31,20 @@ var binds := {
 }
 
 var _autosave := 0.0
+## 跑无头自检/截图/平衡模拟时置 false：这些流程会调用 mark_cleared / add_insight，
+## 如果不拦就会把模拟结果写进玩家真实存档。
+var save_enabled := true
 ## 上一次广播出去的整数体悟值：只在「显示的数字」变了才发信号。
 ## 以前每帧都发，main 就每帧重建一遍 HUD 文本，纯属白烧 CPU。
 var _emitted_insight := -1
-## 跑无头自检/平衡模拟时置 false：模拟会调用 mark_cleared / add_insight，
-## 如果不拦就会把模拟结果写进玩家真实存档。
-var save_enabled := true
-
 
 ## 这些环境变量是给自检/截图用的开发入口。
 ## 只要带着它们启动，存档就一律只读 —— 守卫必须放在 Autoload 里，
 ## 而不是 main.gd：main.gd 解析失败过（也会让整局跑起来），
 ## 那种情况下守卫要是没生效，自检就会把玩家进度改掉。
 const DEV_ENV := [
-	"JG_BALANCE", "JG_GRIDCHECK", "JG_SELFTEST", "JG_SHIELDTEST",
-	"JG_DEV_LEVEL", "JG_SHOT", "JG_WININFO",
+	"JG_BALANCE", "JG_GRIDCHECK", "JG_SELFTEST", "JG_SHIELDTEST", "JG_TRANSTEST",
+	"JG_DEV_LEVEL", "JG_SHOT", "JG_WININFO", "JG_HOME", "JG_HOUSE", "JG_TRANS", "JG_EDITOR",
 ]
 
 
@@ -53,30 +54,17 @@ func _ready() -> void:
 			save_enabled = false
 			print("GameState: 检测到 %s，存档改为只读" % k)
 			break
+	_init_upgrades()
 	load_state()
 	load_binds()
 	_apply_offline_gain()
 	set_process(true)
 
 
-func _process(delta: float) -> void:
-	var gain := read_rate() * delta
-	if gain > 0.0:
-		insight += gain
-		# 只在显示出来的整数变化时广播：HUD 只关心 1 位小数以外的变化
-		var shown := int(insight)
-		if shown != _emitted_insight:
-			_emitted_insight = shown
-			insight_changed.emit(insight)
-	_autosave += delta
-	if _autosave >= AUTOSAVE_INTERVAL:
-		_autosave = 0.0
-		save_state()
-
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
-		save_state()
+func _init_upgrades() -> void:
+	upgrades.clear()
+	for id in UnitData.UPGRADE_ORDER:
+		upgrades[id] = 0
 
 
 # --- 派生数值 ---
@@ -87,34 +75,101 @@ func read_rate() -> float:
 
 
 func read_mult() -> float:
-	return float(UnitData.HOUSE_STAGES[house_stage]["read_mult"])
+	return 1.0 + 0.30 * float(up_level("insight"))
 
 
-## 塔属性倍率。房屋重建会提高它，场上已有的分身也会立刻跟着变（见 BattleField）。
+## 纸笔自然回复倍率（战斗层用它乘到每关的回复速度上）
+func ink_mult() -> float:
+	return 1.0 + 0.12 * float(up_level("ink"))
+
+
+## 分身属性倍率。升级后场上已有的分身也会立刻跟着变（见 BattleField）
 func tower_mult() -> float:
-	return float(UnitData.HOUSE_STAGES[house_stage]["tower_mult"])
+	return 1.0 + 0.10 * float(up_level("power"))
 
 
-## 塔加成百分比，给界面显示用，例如 +26
+## 塔加成百分比，给界面显示用，例如 +20
 func tower_bonus_percent() -> int:
 	return int(round((tower_mult() - 1.0) * 100.0))
 
 
-func house_name() -> String:
-	return str(UnitData.HOUSE_STAGES[house_stage]["name"])
+## 第一波敌人额外延迟（秒）
+func prep_time() -> float:
+	return 1.5 * float(up_level("prep"))
 
 
-## 下一阶段花费，-1 表示已满级
-func next_house_cost() -> int:
-	if house_stage + 1 >= UnitData.HOUSE_STAGES.size():
+## 战斗里能开到的最大倍速
+func max_speed() -> float:
+	return 2.0 + float(up_level("speed"))
+
+
+## 分身能升到的最高等级
+func tower_level_cap() -> int:
+	return UnitData.TOWER_BASE_LEVEL_CAP + up_level("level")
+
+
+## 书屋进度（0~1），用来给小屋插画调亮度
+func house_progress() -> float:
+	var total := 0
+	var got := 0
+	for id in UnitData.UPGRADE_ORDER:
+		total += int(UnitData.UPGRADES[id]["max"])
+		got += up_level(id)
+	if total <= 0:
+		return 0.0
+	return float(got) / float(total)
+
+
+func house_level_sum() -> int:
+	var got := 0
+	for id in UnitData.UPGRADE_ORDER:
+		got += up_level(id)
+	return got
+
+
+func house_level_total() -> int:
+	var total := 0
+	for id in UnitData.UPGRADE_ORDER:
+		total += int(UnitData.UPGRADES[id]["max"])
+	return total
+
+
+# --- 书屋升级 ---
+
+func up_level(id: String) -> int:
+	return int(upgrades.get(id, 0))
+
+
+func up_max(id: String) -> int:
+	return int((UnitData.UPGRADES.get(id, {}) as Dictionary).get("max", 0))
+
+
+## 下一级价格；-1 = 已满级
+func up_cost(id: String) -> int:
+	var def: Dictionary = UnitData.UPGRADES.get(id, {})
+	var costs: Array = def.get("costs", [])
+	var lv := up_level(id)
+	if lv >= int(def.get("max", 0)) or lv >= costs.size():
 		return -1
-	return int(UnitData.HOUSE_STAGES[house_stage + 1]["cost"])
+	return int(costs[lv])
 
 
-func next_house_name() -> String:
-	if house_stage + 1 >= UnitData.HOUSE_STAGES.size():
-		return ""
-	return str(UnitData.HOUSE_STAGES[house_stage + 1]["name"])
+func can_buy_upgrade(id: String) -> bool:
+	var cost := up_cost(id)
+	return cost >= 0 and insight >= float(cost)
+
+
+func buy_upgrade(id: String) -> bool:
+	var cost := up_cost(id)
+	if cost < 0 or insight < float(cost):
+		return false
+	insight -= float(cost)
+	upgrades[id] = up_level(id) + 1
+	_emitted_insight = int(insight)
+	insight_changed.emit(insight)
+	upgrades_changed.emit()
+	save_state()
+	return true
 
 
 # --- 交易 ---
@@ -127,24 +182,13 @@ func add_insight(amount: float) -> void:
 	insight_changed.emit(insight)
 
 
-func buy_house_stage() -> bool:
-	var cost := next_house_cost()
-	if cost < 0 or insight < float(cost):
-		return false
-	insight -= float(cost)
-	house_stage += 1
-	insight_changed.emit(insight)
-	house_changed.emit(house_stage)
-	save_state()
-	return true
-
-
-## 买纸笔：只负责扣体悟。加纸笔由战斗层立刻给（一次性，关卡结束就没了）。
+## 买纸笔：只负责扣体悟。加纸笔由战斗层立刻给（一次性，关卡结束就没了）
 func buy_ink_pack() -> bool:
 	var cost := int(UnitData.INK_PACK["cost"])
 	if insight < float(cost):
 		return false
 	insight -= float(cost)
+	_emitted_insight = int(insight)
 	insight_changed.emit(insight)
 	save_state()
 	return true
@@ -160,10 +204,6 @@ func ink_pack_bonus() -> int:
 
 # --- 关卡进度 ---
 
-func level_unlocked(index: int) -> bool:
-	return index <= cleared_count
-
-
 func mark_cleared(index: int) -> void:
 	if index == cleared_count:
 		cleared_count = index + 1
@@ -178,7 +218,7 @@ func save_state() -> void:
 	last_seen = int(Time.get_unix_time_from_system())
 	var data := {
 		"insight": insight,
-		"house_stage": house_stage,
+		"upgrades": upgrades,
 		"cleared_count": cleared_count,
 		"seen_enemies": seen_enemies,
 		"last_seen": last_seen,
@@ -204,12 +244,25 @@ func load_state() -> void:
 		return
 	var data: Dictionary = parsed
 	insight = float(data.get("insight", 0.0))
-	house_stage = clampi(int(data.get("house_stage", 0)), 0, UnitData.HOUSE_STAGES.size() - 1)
 	cleared_count = clampi(int(data.get("cleared_count", 0)), 0, UnitData.BASE_DATA["levels"].size())
 	var seen: Variant = data.get("seen_enemies", {})
 	if seen is Dictionary:
 		seen_enemies = seen
 	last_seen = int(data.get("last_seen", 0))
+
+	# 升级表：逐条读，越界就夹住；老存档没有这个字段就走下面的迁移
+	var ups: Variant = data.get("upgrades", null)
+	if ups is Dictionary:
+		for id in UnitData.UPGRADE_ORDER:
+			if (ups as Dictionary).has(id):
+				upgrades[id] = clampi(int(ups[id]), 0, up_max(id))
+	elif data.has("house_stage"):
+		# v0.1.11 之前只有线性的 house_stage（0~4，同时给塔倍率和阅读倍率）。
+		# 迁移成两条轨道，尽量保留原来的手感。
+		var stage := clampi(int(data["house_stage"]), 0, 5)
+		upgrades["power"] = clampi(stage, 0, up_max("power"))
+		upgrades["insight"] = clampi(stage, 0, up_max("insight"))
+	_emitted_insight = int(insight)
 
 
 func _apply_offline_gain() -> void:
@@ -225,19 +278,40 @@ func _apply_offline_gain() -> void:
 
 func reset_progress() -> void:
 	insight = 0.0
-	house_stage = 0
+	_init_upgrades()
 	cleared_count = 0
 	last_seen = 0
 	seen_enemies = {}
 	save_state()
+	_emitted_insight = int(insight)
 	insight_changed.emit(insight)
-	house_changed.emit(house_stage)
+	upgrades_changed.emit()
 
 
-# --- 键位设置（写在单独的 settings.json，清空存档不会清掉）---
+# --- 进程 ---
 
-## 设置文件里既存键位也存音效开关；键位是平的 "action -> keycode"，
-## 音效开关是额外的 sfx_muted 键，老存档没有这一项就按默认（开）处理。
+func _process(delta: float) -> void:
+	var gain := read_rate() * delta
+	if gain > 0.0:
+		insight += gain
+		# 只在显示出来的整数变化时广播：HUD 只关心这个粒度
+		var shown := int(insight)
+		if shown != _emitted_insight:
+			_emitted_insight = shown
+			insight_changed.emit(insight)
+	_autosave += delta
+	if _autosave >= AUTOSAVE_INTERVAL:
+		_autosave = 0.0
+		save_state()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		save_state()
+
+
+# --- 键位 / 音效设置（写在单独的 settings.json，清空存档不会清掉）---
+
 func load_binds() -> void:
 	if not FileAccess.file_exists(SETTINGS_PATH):
 		return

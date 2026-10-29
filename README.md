@@ -1,13 +1,13 @@
-# 情感体悟
+# 斋悟
 
-一个 2D 塔防 + 养成的小游戏。用 Godot 4.7.2 制作。
+一个 2D 塔防 + 书屋养成的小游戏。用 Godot 4.7.2 制作。
 
 > 这个世界存在魔法，「情感体悟」是通用货币，文字与故事具有生命，施法必须要有纸笔。
 >
 > 小魔女在炼药时不小心发生了爆炸，书屋被毁了，剧情文字跑了出去。
 > 迫于无奈，小魔女只好去收集飘落的剧情，重建小屋。
 
-**当前版本：v0.1.11（试玩版）**
+**当前版本：v0.2.0（试玩版）**
 
 ---
 
@@ -23,10 +23,27 @@
 
 ## 玩法
 
+- **首页（斋悟）** → 书架抽书进选关页 / 推门进书屋；三处切换都有墨色转场
 - 地图上有条路，敌人（会跑的字）从左边往右边的「书」冲
 - 花「纸笔」在路上 / 路旁放小纸人（施法分身）拦住它们
 - 漏一个敌人扣 1 点剧情完整度，扣光就输
-- 打赢获得「情感体悟」，用来养成（重建小屋、买纸笔补给）
+- 打赢获得「情感体悟」，在书屋点亮永久升级（也可以在战斗里应急买纸笔）
+
+### 书屋（永久升级）
+
+首页右边的门进去，6 条互相独立的轨道，各花各的体悟：
+
+| 升级 | 效果 | 上限 |
+|---|---|---|
+| 阅读产出 | +30%/级 体悟自动累积 | 5 级 |
+| 纸笔效率 | +12%/级 战斗内纸笔回复 | 5 级 |
+| 分身强化 | +10%/级 全部分身攻/血（场上已有的也立刻变强） | 5 级 |
+| 开局准备 | +1.5 秒/级 第一波字出现得更晚 | 4 级 |
+| 加速上限 | 战斗倍速上限 +1 档 | 2 级（→x4） |
+| 升级上限 | 分身等级上限 +1（解锁第 4/5 级） | 2 级（→5 级） |
+
+分身的 5 级数据**一次写全**在 `unit_data.gd`，默认只能升到 3 级，
+第 4/5 级要靠「升级上限」解锁 —— 解锁时不用再改数据结构。
 
 ### 两类格子（核心规则）
 
@@ -84,7 +101,7 @@
 ```
 core/       数据表（数值/配色/关卡）与存档
   unit_data.gd      ★所有数值、关卡、路线都在这里，调平衡只改这个文件
-  game_state.gd     体悟、小屋、离线收益、键位与音效开关（Autoload）
+  game_state.gd     体悟、书屋升级、离线收益、键位与音效开关（Autoload）
   audio.gd          音效播放（Autoload）：预加载、复音池、节流、静音
 battle/     战斗
   battle_field.gd   战场：格子、索敌、固定步长模拟、绘制
@@ -92,7 +109,14 @@ battle/     战斗
   tower.gd          施法分身
   enemy.gd          文字敌人
 ui/         界面
-  main.gd, main.tscn   HUD、卷帘门养成、关卡选择、结算、按键设置
+  main.gd, main.tscn   HUD、关卡选择、结算、按键设置、界面调度
+  home_screen.gd     ★首页：标题「斋悟」+ 书架（抽书选关）+ 门（进书屋）
+  house_screen.gd    ★书屋：6 条升级轨道，花体悟点亮
+  ink_transition.gd  墨色转场（从点击处漫开盖住屏幕，切换后再化开）
+  fx_layer.gd        界面粒子层（按钮按下喷墨点）
+  icon_badge.gd      货币图标徽标（体悟 / 纸笔）
+  title_decor.gd     选关页的装饰层（纸纹、飘字、小屋卡片）
+  ui_style.gd        界面样式集中处（面板/按钮圆角与配色）
 art/        美术与音频
   house/            小屋插画
   sfx/              ★音效（18 个小 wav，CC0，见 sfx/CREDITS.md）
@@ -100,6 +124,7 @@ docs/       文档
   操作说明.txt        给玩家看的说明书
   art_tasks.md        给美术的需求清单
   build_and_share.md  打包与分发说明
+effect.md   ★表现层清单：音效/粒子/转场/UI 反馈该加在哪、怎么加、踩过的坑
 tools/      构建脚本
   export_windows.ps1  打 Windows 包
   export_web.ps1      打网页版
@@ -140,18 +165,25 @@ $env:JG_SELFTEST=1; godot --headless --path .
 # 穿盾回归：一个盾（挡 3）+ 6 个敌人，必须没人穿过去
 $env:JG_SHIELDTEST=1; godot --headless --path .
 
+# 转场流程：切换动作必须在遮罩最满那一帧执行、结束后状态复位
+$env:JG_TRANSTEST=1; godot --headless --path .
+
 # 直接进第 3 关并摆好测试布阵，可选自动截图
 $env:JG_DEV_LEVEL=3; $env:JG_SHOT="D:\shot.png"; godot --path .
 
-# 只截关卡选择页 / 看「选好塔正在找位置」的状态
+# 首页 / 书屋 / 选关页截图 / 看「选好塔正在找位置」的状态
+$env:JG_HOME=1; $env:JG_SHOT="D:\home.png"; godot --path .
+$env:JG_HOUSE=1; $env:JG_SHOT="D:\house.png"; godot --path .
 $env:JG_SHOT="D:\select.png"; godot --path .
 $env:JG_DEV_LEVEL=1; $env:JG_PENDING=bolt; $env:JG_SHOT="D:\placing.png"; godot --path .
+$env:JG_TRANS=0.55; $env:JG_SHOT="D:\trans.png"; godot --path .   # 转场钉在 55%
 ```
 
 调试入口会**自动关掉存档写入**，不会把你自己的进度改坏。
+（守卫在 `GameState._ready()` 里，不依赖 `main.gd` 是否加载成功。）
 
 平衡门禁的判定标准在 `ui/main.gd` 的 `BALANCE_MIN_BASE` /
-`BALANCE_MUST_WIN_UNUPGRADED` 里：前四关要求在「小屋=废墟、完全不升级」
+`BALANCE_MUST_WIN_UNUPGRADED` 里：前四关要求在「书屋零升级」
 的前提下也能过，第 5 关允许靠升级打过去。
 
 ---

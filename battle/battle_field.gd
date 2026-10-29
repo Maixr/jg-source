@@ -39,6 +39,9 @@ var shots: Array = []
 var floats: Array = []
 ## 墨点飞溅（敌人被击杀 / 分身消散）：{pos, r, life, max_life, color}
 var splats: Array = []
+## 交互/反馈粒子：环、纸屑、火花
+## {kind, pos, t, dur, color, ...}，kind = ring / shard / spark
+var fx: Array = []
 
 var high_cells: Array = []
 var ground_cells: Array = []
@@ -102,7 +105,7 @@ func _ready() -> void:
 	_backdrop.setup(self)
 	add_child(_backdrop)
 	if GS != null:
-		GS.house_changed.connect(_on_house_changed)
+		GS.upgrades_changed.connect(_on_upgrades_changed)
 	set_process(true)
 
 
@@ -134,14 +137,14 @@ func _sfx_var(name: String, volume_db: float = 0.0, spread: float = 0.05) -> voi
 	AU.play_var(name, volume_db, spread)
 
 
-## 小屋重建后，把新倍率套用到所有已存在的分身上
-func _on_house_changed(_stage: int) -> void:
+## 书屋里点了「分身强化」之后，把新倍率套到所有已经放好的分身上
+func _on_upgrades_changed() -> void:
 	var mult: float = GS.tower_mult()
 	for t in towers:
 		(t as Tower).reapply_mult(mult)
 	if not towers.is_empty():
 		_flash_text((towers[0] as Tower).pos + Vector2(0.0, -34.0),
-			"小屋重建：分身 +%d%%" % GS.tower_bonus_percent(), UnitData.LEAF)
+			"分身 +%d%%" % GS.tower_bonus_percent(), UnitData.LEAF)
 	stats_changed.emit()
 	_refresh_backdrop()
 	queue_redraw()
@@ -333,6 +336,7 @@ func start_level(index: int) -> void:
 	shots.clear()
 	floats.clear()
 	splats.clear()
+	fx.clear()
 	selected = null
 	pending_tower = ""
 	elapsed = 0.0
@@ -348,7 +352,7 @@ func start_level(index: int) -> void:
 	base_max = int(level.get("base_hp", 12))
 	base_hp = base_max
 	ink = float(level.get("start_ink", 20))
-	_ink_rate = UnitData.INK_REGEN * float(level.get("ink_mult", 1.0))
+	_ink_rate = UnitData.INK_REGEN * float(level.get("ink_mult", 1.0)) * GS.ink_mult()
 	routes = UnitData.level_routes(index)
 	_quantize_routes()
 	_build_cells()
@@ -375,6 +379,15 @@ func start_level(index: int) -> void:
 					"wave": wi,
 				})
 	_spawns.sort_custom(func(a, b): return float(a["at"]) < float(b["at"]))
+	# 书屋的「开局准备」：只推迟第一波，给玩家更多布阵时间。
+	# 推迟所有波次会让节奏整体变拖，就没意义了。
+	var prep: float = GS.prep_time()
+	if prep > 0.0 and not _spawns.is_empty():
+		var first_wave: int = int((_spawns[0] as Dictionary).get("wave", 0))
+		for it in _spawns:
+			if int((it as Dictionary).get("wave", -1)) == first_wave:
+				it["at"] = float(it["at"]) + prep
+		_spawns.sort_custom(func(a, b): return float(a["at"]) < float(b["at"]))
 	stats_changed.emit()
 	progress_changed.emit(kill_count, total_enemies)
 	selection_changed.emit(null)
@@ -504,6 +517,8 @@ func _place_exact(tower_id: String, cell: Vector2) -> bool:
 	ink -= float(cost)
 	_flash_text(cell, "-%d 纸笔" % cost, UnitData.ORANGE)
 	_sfx("place", -6)
+	_fx_ring(cell, UnitData.ORANGE, 44.0)
+	_fx_sparks(cell, UnitData.PAPER, 5)
 	_refresh_backdrop()
 	queue_redraw()
 	return true
@@ -533,6 +548,7 @@ func remove_tower(tw: Tower) -> bool:
 		selection_changed.emit(null)
 	_flash_text(tw.pos, "退还 %d 纸笔" % refund, UnitData.LEAF)
 	_sfx("remove", -8)
+	_fx_shards(tw.pos, UnitData.PAPER, 8)
 	stats_changed.emit()
 	_refresh_backdrop()
 	queue_redraw()
@@ -551,6 +567,9 @@ func upgrade_selected() -> bool:
 func try_upgrade(tw: Tower) -> bool:
 	if tw == null or not running:
 		return false
+	# 等级上限来自书屋：数据里写了 5 级，没解锁就只能到 3 级
+	if tw.level >= GS.tower_level_cap():
+		return false
 	var cost := UnitData.tower_upgrade_cost(tw.id, tw.level + 1)
 	if cost < 0 or ink < float(cost):
 		return false
@@ -560,6 +579,8 @@ func try_upgrade(tw: Tower) -> bool:
 	tw.invested += cost
 	_flash_text(tw.pos, "升到 %d 级" % tw.level, UnitData.LEAF)
 	_sfx("upgrade", -4)
+	_fx_ring(tw.pos, UnitData.LEAF, 54.0)
+	_fx_sparks(tw.pos, UnitData.PAPER, 8)
 	stats_changed.emit()
 	queue_redraw()
 	return true
@@ -571,7 +592,7 @@ func _auto_upgrade_once() -> bool:
 	var best_cost := 1 << 30
 	for t in towers:
 		var tw := t as Tower
-		if tw.level >= UnitData.tower_max_level(tw.id):
+		if tw.level >= GS.tower_level_cap():
 			continue
 		var c := UnitData.tower_upgrade_cost(tw.id, tw.level + 1)
 		if c < 0 or ink < float(c):
@@ -957,6 +978,18 @@ func _update_effects(delta: float) -> void:
 		sp["life"] = float(sp["life"]) - delta
 	splats = splats.filter(func(sp): return float(sp["life"]) > 0.0)
 
+	for f in fx:
+		f["t"] = float(f["t"]) + delta
+		var kind := str(f["kind"])
+		if kind == "shard":
+			f["pos"] = (f["pos"] as Vector2) + (f["vel"] as Vector2) * delta
+			f["vel"] = (f["vel"] as Vector2) + Vector2(0.0, 900.0) * delta
+			f["rot"] = float(f["rot"]) + float(f["spin"]) * delta
+		elif kind == "spark":
+			f["pos"] = (f["pos"] as Vector2) + (f["vel"] as Vector2) * delta
+			f["vel"] = (f["vel"] as Vector2) + Vector2(0.0, 260.0) * delta
+	fx = fx.filter(func(f): return float(f["t"]) < float(f["dur"]))
+
 	_book_flash = maxf(0.0, _book_flash - delta * 2.4)
 	if _shake > 0.0:
 		_shake = maxf(0.0, _shake - delta * 14.0)
@@ -976,6 +1009,7 @@ func _cleanup() -> void:
 				_book_flash = 1.0
 				_shake = maxf(_shake, 6.0)
 				_sfx("leak", -2)
+				_fx_ring(en.pos, Color("d9573f"), 62.0, 0.55)
 				_flash_text(en.pos, "-%d 剧情" % en.leak, Color("d9573f"))
 			else:
 				kill_count += 1
@@ -1058,6 +1092,63 @@ func _splat(pos: Vector2, color: Color, radius: float) -> void:
 			"max_life": 0.30 + 0.05 * float(i % 3),
 			"color": color,
 		})
+
+
+# --- 交互粒子 ---
+
+## 一圈扩散的环：放置/升级/漏字都靠它给"这一下发生了"的确认感
+func _fx_ring(pos: Vector2, color: Color, r1: float, dur: float = 0.42) -> void:
+	fx.append({"kind": "ring", "pos": pos, "t": 0.0, "dur": dur,
+		"r0": 6.0, "r1": r1, "color": color})
+
+
+## 纸屑：移除分身时飞出去的碎纸片（带旋转和重力）
+func _fx_shards(pos: Vector2, color: Color, n: int = 7) -> void:
+	for i in n:
+		var a := randf_range(-PI, 0.0)
+		fx.append({
+			"kind": "shard", "pos": pos, "t": 0.0,
+			"dur": randf_range(0.45, 0.8),
+			"vel": Vector2(cos(a), sin(a)) * randf_range(60.0, 160.0),
+			"rot": randf_range(0.0, TAU), "spin": randf_range(-9.0, 9.0),
+			"size": randf_range(3.0, 6.0), "color": color,
+		})
+
+
+## 火花/碎光：升级时向上飘的一点亮
+func _fx_sparks(pos: Vector2, color: Color, n: int = 6) -> void:
+	for i in n:
+		var a := -PI * 0.5 + randf_range(-1.1, 1.1)
+		fx.append({
+			"kind": "spark", "pos": pos + Vector2(randf_range(-8.0, 8.0), randf_range(-6.0, 6.0)),
+			"t": 0.0, "dur": randf_range(0.35, 0.6),
+			"vel": Vector2(cos(a), sin(a)) * randf_range(70.0, 150.0),
+			"size": randf_range(1.6, 3.2), "color": color,
+		})
+
+
+func _draw_fx() -> void:
+	for f in fx:
+		var k := clampf(float(f["t"]) / float(f["dur"]), 0.0, 1.0)
+		var c: Color = f["color"]
+		match str(f["kind"]):
+			"ring":
+				var r := lerpf(float(f["r0"]), float(f["r1"]), ease(k, 0.35))
+				c.a = (1.0 - k) * 0.8
+				draw_arc(f["pos"], r, 0.0, TAU, 40, c, 3.0 * (1.0 - k * 0.7), true)
+			"shard":
+				c.a = 1.0 - k * 0.85
+				var s := float(f["size"])
+				var pts := PackedVector2Array([
+					Vector2(-s, -s * 0.4), Vector2(s, -s * 0.4),
+					Vector2(s, s * 0.4), Vector2(-s, s * 0.4)])
+				var rot := float(f["rot"])
+				for i in pts.size():
+					pts[i] = (f["pos"] as Vector2) + pts[i].rotated(rot)
+				draw_colored_polygon(pts, c)
+			"spark":
+				c.a = 1.0 - k
+				draw_circle(f["pos"], float(f["size"]) * (1.0 - k * 0.6), c)
 
 
 # --- 平衡模拟器（开发用） ---
@@ -1166,6 +1257,7 @@ func _draw() -> void:
 		_draw_enemy(e as Enemy)
 	_draw_shots()
 	_draw_splats()
+	_draw_fx()
 	for f in floats:
 		var a := clampf(float(f["life"]) / 0.9, 0.0, 1.0)
 		var c: Color = f["color"]

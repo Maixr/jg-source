@@ -5,7 +5,6 @@ extends Control
 ## HUD 不跟着每帧刷：体悟、纸笔这些数字变化时只打一个 dirty 标记，
 ## _process 里按 HUD_INTERVAL 节流统一刷新一次。
 
-const DRAWER_W := 430.0
 ## HUD 最短刷新间隔（秒）。战场 60Hz，界面 8Hz 已经比肉眼快。
 const HUD_INTERVAL := 0.12
 ## 开局规则横幅停留时间（秒）
@@ -36,18 +35,21 @@ var btn_speed: Button
 var btn_pause: Button
 var btn_back: Button
 var btn_sfx: Button
+## 战斗中的一次性补给：原来在右侧抽屉里，抽屉拆掉后挪到顶栏
+var btn_pack: Button
+## 顶栏 / 底栏：只在战斗界面出现
+var top_bar: Control
+var bottom_bar: Control
 
-var drawer: Control
-var drawer_open := false
-var drawer_handle: Button
-var drawer_house_name: Label
-var drawer_house_tex: TextureRect
-var drawer_rebuild: Button
-var drawer_pack: Button
-var drawer_rate: Label
 
 var level_panel: Control
 var level_buttons: Array = []
+## 首页（标题 / 书架 / 门）与书屋（升级）
+var home_panel: HomeScreen
+var house_panel: HouseScreen
+## 界面交互粒子与墨色转场
+var fx_layer: FxLayer
+var transition: InkTransition
 
 var result_panel: Control
 var confirm_panel: Control
@@ -66,25 +68,34 @@ var _hud_wait := 0.0
 func _ready() -> void:
 	var win := get_window()
 	if win != null:
-		win.title = "情感体悟 %s %s" % [UnitData.GAME_VERSION, UnitData.GAME_CHANNEL]
+		win.title = "%s %s %s" % [UnitData.GAME_TITLE, UnitData.GAME_VERSION, UnitData.GAME_CHANNEL]
 	# 根节点必须忽略鼠标，否则这个全屏 Control 会把所有点击吃掉，
 	# 战场的 _unhandled_input 就永远收不到事件（表现为“点左键放不下单位”）。
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_apply_theme()
+	# 先建粒子层和转场层：_make_button() 里要往上喷粒子
+	fx_layer = FxLayer.new()
+	fx_layer.name = "FxLayer"
+	add_child(fx_layer)
+	transition = InkTransition.new()
+	transition.name = "InkTransition"
+	transition.z_index = 200
+	add_child(transition)
 	_build_field()
 	_build_pause_overlay()
 	_build_top_bar()
 	_build_bottom_bar()
-	_build_drawer()
 	_build_rule_banner()
 	_build_level_select()
+	_build_home()
+	_build_house()
 	_build_result()
 	_build_confirm_panel()
 	_build_enemy_card()
 	_build_settings_panel()
 	GS.insight_changed.connect(_mark_hud)
-	GS.house_changed.connect(_mark_hud)
-	GS.house_changed.connect(func(_s): _refresh_drawer())
+	GS.upgrades_changed.connect(_mark_hud)
+	GS.upgrades_changed.connect(func(): if house_panel.visible: house_panel.refresh())
 
 	# --- 开发/自检入口（正式版可以删掉这一段）---
 	# 存档只读的守卫在 GameState 里（Autoload 先跑，即使本脚本解析失败也生效）。
@@ -107,8 +118,6 @@ func _ready() -> void:
 		# JG_PENDING=bolt 可以直接进「选好了塔、正在找位置」的状态，方便截图
 		if OS.has_environment("JG_PENDING"):
 			field.set_pending(OS.get_environment("JG_PENDING"))
-		if OS.has_environment("JG_DRAWER"):
-			_toggle_drawer()
 		if OS.has_environment("JG_SHOT"):
 			_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
 		return
@@ -119,13 +128,34 @@ func _ready() -> void:
 	if OS.has_environment("JG_SHIELDTEST"):
 		_run_shield_test.call_deferred()
 		return
+	# 转场流程测试 / 把转场钉在某个进度上截图
+	if OS.has_environment("JG_TRANSTEST"):
+		_run_transition_test.call_deferred()
+		return
+	if OS.has_environment("JG_TRANS"):
+		_show_level_select()
+		transition.debug_hold(float(OS.get_environment("JG_TRANS")), Vector2(760.0, 430.0))
+		if OS.has_environment("JG_SHOT"):
+			_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
+		return
+	# 首页 / 书屋的截图入口
+	if OS.has_environment("JG_HOUSE"):
+		_show_house()
+		if OS.has_environment("JG_SHOT"):
+			_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
+		return
+	if OS.has_environment("JG_HOME"):
+		_show_home()
+		if OS.has_environment("JG_SHOT"):
+			_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
+		return
 	# 只截图关卡选择页（不带 JG_DEV_LEVEL 时走这里）
 	if OS.has_environment("JG_SHOT"):
 		_show_level_select()
 		_run_shot.call_deferred(OS.get_environment("JG_SHOT"))
 		return
 
-	_show_level_select()
+	_show_home()
 	_flush_hud()
 
 
@@ -226,6 +256,7 @@ func _build_pause_overlay() -> void:
 func _build_top_bar() -> void:
 	var bar := PanelContainer.new()
 	bar.name = "TopBar"
+	top_bar = bar
 	bar.add_theme_stylebox_override("panel", _panel_style(0.9))
 	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	bar.offset_left = 10.0
@@ -239,6 +270,8 @@ func _build_top_bar() -> void:
 	row.add_theme_constant_override("separation", 20)
 	bar.add_child(row)
 
+	# 货币前面带图标：只有两个字太素，也分不清哪个是钱
+	row.add_child(IconBadge.new("insight", 10.0, Color(0.91, 0.66, 0.76)))
 	lbl_insight = _make_label("体悟 0")
 	lbl_insight.add_theme_color_override("font_color", UnitData.PINK)
 	row.add_child(lbl_insight)
@@ -269,8 +302,13 @@ func _build_top_bar() -> void:
 	btn_sfx.pressed.connect(_toggle_sfx)
 	row.add_child(btn_sfx)
 
+	# 原来这个按钮在右侧养成抽屉里；抽屉拆掉了，挪到顶栏
+	btn_pack = _make_button("补纸笔")
+	btn_pack.pressed.connect(_on_pack_pressed)
+	row.add_child(btn_pack)
+
 	btn_back = _make_button("返回书页")
-	btn_back.pressed.connect(_show_level_select)
+	btn_back.pressed.connect(_back_to_select)
 	row.add_child(btn_back)
 
 	var ver := _make_label("%s %s" % [UnitData.GAME_VERSION, UnitData.GAME_CHANNEL])
@@ -282,6 +320,7 @@ func _build_top_bar() -> void:
 func _build_bottom_bar() -> void:
 	var bar := PanelContainer.new()
 	bar.name = "BottomBar"
+	bottom_bar = bar
 	bar.add_theme_stylebox_override("panel", _panel_style(0.9))
 	bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bar.offset_left = 10.0
@@ -298,13 +337,18 @@ func _build_bottom_bar() -> void:
 	# 纸笔 + 打怪进度：放在操作栏左侧，视线和手都不用来回跑
 	var info := VBoxContainer.new()
 	info.add_theme_constant_override("separation", 2)
-	info.custom_minimum_size = Vector2(186.0, 0.0)
+	info.custom_minimum_size = Vector2(196.0, 0.0)
 	row.add_child(info)
 
+	# 纸笔（墨滴图标）+ 数字
+	var ink_row := HBoxContainer.new()
+	ink_row.add_theme_constant_override("separation", 6)
+	info.add_child(ink_row)
+	ink_row.add_child(IconBadge.new("ink", 11.0, UnitData.ORANGE))
 	lbl_ink = _make_label("纸笔 0")
 	lbl_ink.add_theme_font_size_override("font_size", 22)
 	lbl_ink.add_theme_color_override("font_color", UnitData.ORANGE)
-	info.add_child(lbl_ink)
+	ink_row.add_child(lbl_ink)
 
 	lbl_progress = _make_label("击杀 0 / 0")
 	lbl_progress.add_theme_font_size_override("font_size", 15)
@@ -372,84 +416,6 @@ func _tower_tooltip(id: String) -> String:
 		int(s["hp"]), int(s["atk"]), float(s["interval"])]
 
 
-func _build_drawer() -> void:
-	drawer = PanelContainer.new()
-	drawer.name = "Drawer"
-	drawer.add_theme_stylebox_override("panel", _panel_style(0.97))
-	drawer.anchor_left = 1.0
-	drawer.anchor_right = 1.0
-	drawer.anchor_top = 0.0
-	drawer.anchor_bottom = 1.0
-	drawer.offset_left = -DRAWER_W
-	drawer.offset_right = 0.0
-	drawer.offset_top = 58.0
-	drawer.offset_bottom = -104.0
-	# 关着的时候推到屏幕右边界外（用设计宽度，别用写死的 1280）
-	drawer.position.x = UnitData.DESIGN_SIZE.x
-	drawer.visible = false
-	add_child(drawer)
-
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
-	drawer.add_child(col)
-
-	var title := _make_label("养成 · 情感体悟")
-	title.add_theme_font_override("font", UnitData.font_book())
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", UnitData.PINK)
-	col.add_child(title)
-
-	drawer_house_tex = TextureRect.new()
-	drawer_house_tex.custom_minimum_size = Vector2(0.0, 210.0)
-	drawer_house_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	drawer_house_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	drawer_house_tex.clip_contents = true
-	var tex := load("res://art/house/house_intact.jpg")
-	if tex is Texture2D:
-		drawer_house_tex.texture = tex
-	col.add_child(drawer_house_tex)
-
-	drawer_house_name = _make_label("小屋 · 废墟")
-	drawer_house_name.add_theme_font_size_override("font_size", 18)
-	col.add_child(drawer_house_name)
-
-	drawer_rebuild = _make_button("重建小屋")
-	drawer_rebuild.pressed.connect(_on_rebuild_pressed)
-	col.add_child(drawer_rebuild)
-
-	col.add_child(_separator())
-
-	drawer_pack = _make_button("补充纸笔")
-	drawer_pack.pressed.connect(_on_pack_pressed)
-	col.add_child(drawer_pack)
-
-	drawer_rate = _make_label("阅读产出：0.10 体悟/秒")
-	drawer_rate.add_theme_color_override("font_color", UnitData.LEAF)
-	col.add_child(drawer_rate)
-
-	var tip := _make_label("小魔女在家中读书，体悟会随时间缓慢累积。\n重建小屋能提高分身的数值，也让她读得更快。")
-	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tip.add_theme_color_override("font_color", Color(0.72, 0.69, 0.63))
-	tip.add_theme_font_size_override("font_size", 14)
-	col.add_child(tip)
-
-	var handle := _make_button("养成")
-	handle.name = "DrawerHandle"
-	handle.custom_minimum_size = Vector2(40.0, 120.0)
-	handle.anchor_left = 1.0
-	handle.anchor_right = 1.0
-	handle.anchor_top = 0.5
-	handle.anchor_bottom = 0.5
-	handle.offset_left = -46.0
-	handle.offset_right = -6.0
-	handle.offset_top = -60.0
-	handle.offset_bottom = 60.0
-	handle.pressed.connect(_toggle_drawer)
-	add_child(handle)
-	drawer_handle = handle
-
-
-## 开局横幅：把 unit_data 里写好的 rule 文案用上，补上「没有新手引导」的缺口
 func _build_rule_banner() -> void:
 	rule_banner = PanelContainer.new()
 	rule_banner.name = "RuleBanner"
@@ -477,8 +443,6 @@ func _show_rule_banner(level: Dictionary) -> void:
 	if rule_label == null:
 		return
 	# 抽屉开着的时候不弹横幅：两张卡片会叠在一起
-	if drawer_open:
-		return
 	var name := str(level.get("rule_name", ""))
 	var text := str(level.get("rule", ""))
 	if text.is_empty():
@@ -497,6 +461,124 @@ func _hide_rule_banner() -> void:
 	var tw := create_tween()
 	tw.tween_property(rule_banner, "modulate:a", 0.0, 0.45)
 	tw.tween_callback(func(): rule_banner.visible = false)
+
+
+# --- 首页 / 书屋 ---
+
+func _build_home() -> void:
+	home_panel = HomeScreen.new()
+	home_panel.name = "Home"
+	# 不给尺寸的话 Control 是 0×0，_draw 什么都不会出现（踩过一次）
+	home_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(home_panel)
+	home_panel.open_levels.connect(_on_home_levels)
+	home_panel.open_house.connect(_on_home_house)
+
+
+func _build_house() -> void:
+	house_panel = HouseScreen.new()
+	house_panel.name = "House"
+	house_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	house_panel.visible = false
+	add_child(house_panel)
+	house_panel.closed.connect(_on_house_closed)
+	house_panel.buy_requested.connect(_on_house_buy)
+
+
+func _show_home() -> void:
+	_hide_all_screens()
+	home_panel.visible = true
+	home_panel.reset()
+	field.stop_battle()
+	_flush_hud()
+
+
+func _show_house() -> void:
+	_hide_all_screens()
+	house_panel.visible = true
+	house_screen_refresh()
+	_flush_hud()
+
+
+func house_screen_refresh() -> void:
+	if house_panel != null and house_panel.visible:
+		house_panel.refresh()
+
+
+## 切界面统一走这里：HUD 只在战斗里显示，首页/选关/书屋都不带顶栏底栏
+func _hide_all_screens() -> void:
+	level_panel.visible = false
+	result_panel.visible = false
+	confirm_panel.visible = false
+	settings_panel.visible = false
+	pause_overlay.visible = false
+	home_panel.visible = false
+	house_panel.visible = false
+	if top_bar != null:
+		top_bar.visible = false
+	if bottom_bar != null:
+		bottom_bar.visible = false
+	# 战场也要藏：首页/书屋是实心面板，不藏的话右下会漏出战场的书和格子
+	if field != null:
+		field.visible = false
+
+
+func _on_home_levels() -> void:
+	_sfx("ui_click", -8)
+	_play_transition(func(): _show_level_select())
+
+
+func _on_home_house() -> void:
+	_sfx("drawer", -6)
+	_play_transition(func(): _show_house())
+
+
+func _on_house_closed() -> void:
+	_play_transition(func(): _show_home())
+
+
+func _on_back_home() -> void:
+	_sfx("ui_back", -10)
+	_play_transition(func(): _show_home())
+
+
+func _on_house_buy(id: String) -> void:
+	if GS.buy_upgrade(id):
+		_sfx("upgrade", -4)
+		if fx_layer != null:
+			fx_layer.puff(get_global_mouse_position(), UnitData.LEAF, 8, 120.0)
+	house_screen_refresh()
+
+
+# --- 转场与按钮反馈 ---
+
+## 带墨色转场的切换：屏幕被墨盖住的那一帧才真正换画面
+func _play_transition(mid_action: Callable) -> void:
+	if transition == null or transition.busy:
+		if transition == null and mid_action.is_valid():
+			mid_action.call()
+		return
+	transition.play(mid_action, get_global_mouse_position())
+
+
+## 按钮按下时的交互粒子
+func _on_button_down(b: Button) -> void:
+	if fx_layer == null or not b.is_visible_in_tree():
+		return
+	fx_layer.puff(b.get_global_rect().get_center(),
+		Color(UnitData.PAPER.r, UnitData.PAPER.g, UnitData.PAPER.b, 0.9), 5, 95.0)
+
+
+## 带转场地回到选关页（所有「返回书页」都走这里）
+func _back_to_select() -> void:
+	_sfx("ui_back", -10)
+	_play_transition(func(): _show_level_select())
+
+
+## 带转场地开始一关（用户点关卡卡走这里；自检/调试直接调 _start_level）
+func _on_level_pressed(index: int) -> void:
+	_sfx("ui_click", -8)
+	_play_transition(func(): _start_level(index))
 
 
 func _build_level_select() -> void:
@@ -542,7 +624,7 @@ func _build_level_select() -> void:
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.custom_minimum_size = Vector2(680.0, 92.0)
 		b.add_theme_font_size_override("font_size", 16)
-		b.pressed.connect(_start_level.bind(i))
+		b.pressed.connect(_on_level_pressed.bind(i))
 		_style_button(b, UnitData.LEAF if i % 2 == 0 else UnitData.WOOD)
 		col.add_child(b)
 		level_buttons.append(b)
@@ -561,6 +643,11 @@ func _build_level_select() -> void:
 	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	footer.add_theme_constant_override("separation", 12)
 	col.add_child(footer)
+
+	var back_home := _make_button("返回首页")
+	back_home.custom_minimum_size = Vector2(140.0, 40.0)
+	back_home.pressed.connect(_on_back_home)
+	footer.add_child(back_home)
 
 	var key_btn := _make_button("按键与音效")
 	key_btn.custom_minimum_size = Vector2(160.0, 40.0)
@@ -688,6 +775,8 @@ func _make_button(text: String) -> Button:
 	var b := Button.new()
 	b.text = text
 	_style_button(b)
+	# 所有按钮共用一个按下反馈：在按钮中心喷一小簇墨点
+	b.button_down.connect(_on_button_down.bind(b))
 	return b
 
 
@@ -706,10 +795,9 @@ func _sfx(name: String, volume_db: float = 0.0) -> void:
 # --- 交互 ---
 
 func _show_level_select() -> void:
-	result_panel.visible = false
+	_hide_all_screens()
 	level_panel.visible = true
 	_hide_rule_banner()
-	pause_overlay.visible = false
 	field.stop_battle()
 	_refresh_level_list()
 	_flush_hud()
@@ -738,9 +826,13 @@ func _refresh_level_list() -> void:
 
 func _start_level(index: int) -> void:
 	_sfx("ui_click", -8)
-	level_panel.visible = false
-	result_panel.visible = false
-	pause_overlay.visible = false
+	_hide_all_screens()
+	if top_bar != null:
+		top_bar.visible = true
+	if bottom_bar != null:
+		bottom_bar.visible = true
+	if field != null:
+		field.visible = true
 	field.start_level(index)
 	_show_rule_banner(field.level)
 	_flush_hud()
@@ -763,6 +855,18 @@ func _on_remove_pressed() -> void:
 	_mark_hud()
 
 
+## 一次性补给：扣体悟，纸笔立刻加进这一关（关卡结束就没了）
+func _on_pack_pressed() -> void:
+	if not field.running or field.finished:
+		return
+	if GS.buy_ink_pack():
+		field.add_ink(float(GS.ink_pack_bonus()))
+		_sfx("place", -6)
+		if fx_layer != null:
+			fx_layer.puff(get_global_mouse_position(), UnitData.ORANGE, 6, 110.0)
+	_mark_hud()
+
+
 func _toggle_pause() -> void:
 	if field.finished:
 		return
@@ -772,11 +876,12 @@ func _toggle_pause() -> void:
 	_mark_hud()
 
 
+## 倍速循环 x1 -> x2 -> ... -> 书屋解锁的上限 -> x1
 func _toggle_speed() -> void:
-	if field.speed_scale > 1.5:
+	var cap := int(round(GS.max_speed()))
+	field.speed_scale = float(int(round(field.speed_scale)) + 1)
+	if field.speed_scale > float(cap):
 		field.speed_scale = 1.0
-	else:
-		field.speed_scale = 2.0
 	_sfx("ui_click", -10)
 	_mark_hud()
 
@@ -788,48 +893,10 @@ func _toggle_sfx() -> void:
 	_mark_hud()
 
 
-func _toggle_drawer() -> void:
-	drawer_open = not drawer_open
-	_sfx("drawer", -8)
-	if drawer_open:
-		drawer.visible = true
-		# 打开抽屉就把规则横幅收掉，否则两张卡片会压在一起
-		_hide_rule_banner()
-		# 打开时把手柄挪到面板左边缘，否则会压在面板内容上
-		drawer_handle.text = "收起"
-		drawer_handle.offset_left = -(DRAWER_W + 46.0)
-		drawer_handle.offset_right = -(DRAWER_W + 6.0)
-		drawer.position.x = UnitData.DESIGN_SIZE.x
-		var tw := create_tween()
-		tw.tween_property(drawer, "position:x", UnitData.DESIGN_SIZE.x - DRAWER_W, 0.22) \
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	else:
-		drawer_handle.text = "养成"
-		drawer_handle.offset_left = -46.0
-		drawer_handle.offset_right = -6.0
-		var tw2 := create_tween()
-		tw2.tween_property(drawer, "position:x", UnitData.DESIGN_SIZE.x, 0.2) \
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-		tw2.tween_callback(func(): drawer.visible = false)
-	_refresh_drawer()
 
 
-func _on_rebuild_pressed() -> void:
-	if GS.buy_house_stage():
-		_sfx("upgrade", -4)
-	_refresh_drawer()
-	_mark_hud()
 
 
-func _on_pack_pressed() -> void:
-	# 一次性补给：扣体悟，纸笔立刻加进这一关，关卡结束就没了
-	if not field.running or field.finished:
-		return
-	if GS.buy_ink_pack():
-		field.add_ink(float(GS.ink_pack_bonus()))
-		_sfx("place", -6)
-	_refresh_drawer()
-	_mark_hud()
 
 
 func _on_retry_pressed() -> void:
@@ -850,7 +917,6 @@ func _on_battle_finished(win: bool, gained: float) -> void:
 	result_detail.text = "获得 %d 情感体悟%s" % [int(gained), extra]
 	result_panel.visible = true
 	pause_overlay.visible = false
-	_refresh_drawer()
 	_flush_hud()
 
 
@@ -874,7 +940,6 @@ func _on_clear_confirmed() -> void:
 	confirm_panel.visible = false
 	GS.reset_progress()
 	_show_level_select()
-	_refresh_drawer()
 	result_panel.visible = false
 
 
@@ -1153,8 +1218,11 @@ func _refresh_hud() -> void:
 
 	if field.selected != null:
 		var t: Tower = field.selected
-		var max_lv: int = UnitData.tower_max_level(t.id)
+		# 等级上限来自书屋；数据里写了 5 级，但没解锁就只能升到 3 级
+		var max_lv: int = GS.tower_level_cap()
 		var next_cost: int = UnitData.tower_upgrade_cost(t.id, t.level + 1)
+		if t.level >= max_lv:
+			next_cost = -1
 		if next_cost < 0:
 			btn_upgrade.text = "已最高级"
 			btn_upgrade.disabled = true
@@ -1178,37 +1246,18 @@ func _refresh_hud() -> void:
 		btn_remove.disabled = true
 
 	btn_pause.text = "继续" if not field.running and not field.finished else "暂停"
-	btn_speed.text = "x2" if field.speed_scale > 1.5 else "x1"
+	btn_speed.text = "x%d" % int(round(field.speed_scale))
 	btn_sfx.text = "音效 关" if GS.sfx_muted else "音效 开"
+	# 战斗中的一次性补给：只在关卡进行中、体悟够的时候可用
+	if btn_pack != null:
+		btn_pack.text = "补纸笔 %d" % GS.ink_pack_cost()
+		btn_pack.disabled = not field.running or field.finished \
+			or float(GS.insight) < float(GS.ink_pack_cost())
+		btn_pack.visible = field.running and not field.finished
 	btn_sfx.add_theme_color_override("font_color",
 		Color(0.66, 0.63, 0.58) if GS.sfx_muted else UnitData.PAPER)
-	_refresh_drawer()
 
 
-func _refresh_drawer() -> void:
-	if drawer_house_name == null:
-		return
-	drawer_house_name.text = "小屋 · %s" % str(GS.house_name())
-	var cost: int = int(GS.next_house_cost())
-	if cost < 0:
-		drawer_rebuild.text = "小屋已重建完成"
-		drawer_rebuild.disabled = true
-	else:
-		drawer_rebuild.text = "重建：%s（%d 体悟）" % [
-			str(UnitData.HOUSE_STAGES[int(GS.house_stage) + 1]["name"]), cost]
-		drawer_rebuild.disabled = float(GS.insight) < float(cost)
-
-	drawer_pack.text = "立刻补 %d 纸笔（%d 体悟，仅本关）" % [
-		GS.ink_pack_bonus(), GS.ink_pack_cost()]
-	var can_buy := field.running and not field.finished and float(GS.insight) >= float(GS.ink_pack_cost())
-	drawer_pack.disabled = not can_buy
-	drawer_rate.text = "阅读产出：%.2f 体悟/秒　｜　分身加成：+%d%%" % [
-		float(GS.read_rate()), GS.tower_bonus_percent()]
-
-	# 小屋占位表现：越接近完整，画面越亮越有颜色
-	var stage := float(GS.house_stage) / float(UnitData.HOUSE_STAGES.size() - 1)
-	var lum := lerpf(0.34, 1.0, stage)
-	drawer_house_tex.modulate = Color(lum, lum * 0.98, lum * 0.94, 1.0)
 
 
 # --- 开发入口（正式版可以删） ---
@@ -1218,12 +1267,15 @@ func _refresh_drawer() -> void:
 func _run_balance_check() -> void:
 	# 模拟会调用 mark_cleared / add_insight，必须关掉存档写入，否则污染玩家存档
 	GS.save_enabled = false
-	var saved_stage: int = GS.house_stage
+	var saved_ups: Dictionary = GS.upgrades.duplicate()
 	var saved_cleared: int = GS.cleared_count
-	GS.house_stage = 0
+	var saved_insight: float = GS.insight
+	# 门禁基准 = 书屋一条都没点
+	for id in UnitData.UPGRADE_ORDER:
+		GS.upgrades[id] = 0
 	GS.cleared_count = 0
 	field.audio_enabled = false
-	print("=== 平衡自检（小屋=废墟，无房屋加成，固定步长 %.4fs）===" % UnitData.FIXED_DT)
+	print("=== 平衡自检（书屋零升级，固定步长 %.4fs）===" % UnitData.FIXED_DT)
 	var failures := 0
 	for i in UnitData.BASE_DATA["levels"].size():
 		for mode in [0, 1, 2]:
@@ -1238,8 +1290,9 @@ func _run_balance_check() -> void:
 				i + 1, mode, "WIN " if r["win"] else ("TIME" if r["timeout"] else "LOSE"),
 				r["base"], r["base_max"], r["seconds"], r["placed"], r["levels_sum"],
 				r["insight"], "" if ok else "   <== FAIL"])
-	GS.house_stage = saved_stage
+	GS.upgrades = saved_ups
 	GS.cleared_count = saved_cleared
+	GS.insight = saved_insight
 	if failures == 0:
 		print("=== 自检通过（%d 项全达标）===" % (UnitData.BASE_DATA["levels"].size() * 3))
 	else:
@@ -1298,6 +1351,24 @@ func _run_grid_check() -> void:
 		print("GRID L%d ground=%d high=%d props=%d min_ground_ground=%.1f min_ground_high=%.1f off_lattice=%d prop_overlap=%d" % [
 			i + 1, g.size(), h.size(), field.prop_cells.size(), min_gg, min_gh, offgrid, prop_overlap])
 	get_tree().quit()
+
+
+## 转场流程测试：JG_TRANSTEST=1
+## 断言「切换动作在转场中被执行了一次，转场结束后 busy/visible 都复位」。
+func _run_transition_test() -> void:
+	GS.save_enabled = false
+	_show_level_select()
+	print("TRANSTEST begin")
+	# 注意：GDScript 的 lambda 按值捕获，`hits += 1` 改的是副本。
+	# 想看到副作用必须用数组/对象这种引用类型。
+	var hits := [0]
+	transition.play(func(): hits[0] += 1, Vector2(600.0, 400.0), 0.10, 0.10)
+	# 用定时器轮询而不是 await 信号：万一信号没发出来，这里也不会把进程挂死
+	await get_tree().create_timer(1.2).timeout
+	var ok: bool = int(hits[0]) == 1 and not transition.busy and not transition.visible
+	print("TRANSTEST %s hits=%d busy=%s visible=%s" % [
+		"PASS" if ok else "FAIL", int(hits[0]), str(transition.busy), str(transition.visible)])
+	get_tree().quit(0 if ok else 1)
 
 
 ## 穿盾回归测试：JG_SHIELDTEST=1

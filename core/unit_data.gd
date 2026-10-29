@@ -24,8 +24,8 @@ const BG := Color("2a231b")
 # --- 版本号 ---
 ## 版号 / 标题只在这一处维护：打包脚本会用正则从这里读，
 ## 不用再去 export_windows.ps1 里同步 $exeName。
-const GAME_TITLE := "情感体悟"
-const GAME_VERSION := "v0.1.11"
+const GAME_TITLE := "斋悟"
+const GAME_VERSION := "v0.2.0"
 const GAME_CHANNEL := "试玩版"
 const GAME_BUILD := "2026-10-30"
 
@@ -95,44 +95,55 @@ const TOWERS := {
 	"bolt": {
 		"name": "墨矢", "glyph": "矢", "kind": "ranged", "deploy": "high",
 		"cost": 14, "block": 0, "color": Color("e08a3c"),
-		"upgrade_costs": [12, 20],
+		"upgrade_costs": [12, 20, 34, 52],
 		"levels": [
 			{"hp": 130.0, "atk": 22.0, "range": 224.0, "interval": 1.40},
 			{"hp": 175.0, "atk": 34.0, "range": 224.0, "interval": 1.25},
 			{"hp": 230.0, "atk": 50.0, "range": 288.0, "interval": 1.10},
+			{"hp": 300.0, "atk": 70.0, "range": 288.0, "interval": 1.00},
+			{"hp": 380.0, "atk": 95.0, "range": 320.0, "interval": 0.92},
 		],
 	},
 	"heal": {
 		"name": "疗愈符", "glyph": "愈", "kind": "heal", "deploy": "high",
 		"cost": 15, "block": 0, "color": Color("e8a8c0"),
-		"upgrade_costs": [12, 20],
+		"upgrade_costs": [12, 20, 34, 52],
 		"levels": [
 			{"hp": 140.0, "atk": 18.0, "range": 160.0, "interval": 1.60},
 			{"hp": 180.0, "atk": 30.0, "range": 224.0, "interval": 1.45},
 			{"hp": 230.0, "atk": 45.0, "range": 224.0, "interval": 1.30},
+			{"hp": 300.0, "atk": 62.0, "range": 256.0, "interval": 1.20},
+			{"hp": 380.0, "atk": 85.0, "range": 256.0, "interval": 1.10},
 		],
 	},
 	"blade": {
 		"name": "墨刃", "glyph": "刃", "kind": "melee", "deploy": "ground",
 		"cost": 16, "block": 2, "color": Color("c0392b"),
-		"upgrade_costs": [14, 22],
+		"upgrade_costs": [14, 22, 38, 58],
 		"levels": [
 			{"hp": 300.0, "atk": 16.0, "range": 96.0, "interval": 1.00},
 			{"hp": 400.0, "atk": 24.0, "range": 96.0, "interval": 0.90},
 			{"hp": 540.0, "atk": 36.0, "range": 96.0, "interval": 0.80},
+			{"hp": 720.0, "atk": 52.0, "range": 96.0, "interval": 0.72},
+			{"hp": 950.0, "atk": 74.0, "range": 128.0, "interval": 0.65},
 		],
 	},
 	"shield": {
 		"name": "纸盾", "glyph": "盾", "kind": "shield", "deploy": "ground",
 		"cost": 18, "block": 3, "color": Color("9fb8d8"),
-		"upgrade_costs": [16, 26],
+		"upgrade_costs": [16, 26, 44, 66],
 		"levels": [
 			{"hp": 520.0, "atk": 0.0, "range": 96.0, "interval": 1.00},
 			{"hp": 760.0, "atk": 0.0, "range": 96.0, "interval": 1.00},
 			{"hp": 1100.0, "atk": 0.0, "range": 96.0, "interval": 1.00},
+			{"hp": 1500.0, "atk": 0.0, "range": 96.0, "interval": 1.00},
+			{"hp": 2000.0, "atk": 0.0, "range": 96.0, "interval": 1.00},
 		],
 	},
 }
+
+## 不吃书屋加成时，分身最多升到几级（第 4、5 级要靠 UPGRADES.level 解锁）
+const TOWER_BASE_LEVEL_CAP := 3
 
 const TOWER_ORDER := ["bolt", "blade", "shield", "heal"]
 
@@ -350,18 +361,57 @@ const CLUTTER := {
 	],
 }
 
-# --- 养成 ---
-const HOUSE_STAGES := [
-	{"name": "废墟", "cost": 0, "tower_mult": 1.00, "read_mult": 1.00},
-	{"name": "清出空地", "cost": 40, "tower_mult": 1.12, "read_mult": 1.30},
-	{"name": "修好屋顶", "cost": 90, "tower_mult": 1.26, "read_mult": 1.65},
-	{"name": "补上书架", "cost": 170, "tower_mult": 1.42, "read_mult": 2.05},
-	{"name": "重新点亮", "cost": 300, "tower_mult": 1.60, "read_mult": 2.60},
-]
+# --- 书屋（养成）---
+## 在首页推门进屋，用「体悟」一条条升级，每条的等级单独存。
+## 老版本只有一个线性的 house_stage，乐趣太少；现在拆成 6 条独立轨道，
+## 玩家可以自己决定先点哪个（先多产纸笔？还是先多几秒布阵时间？）。
+##
+## 每条轨道：max 级数、costs 每级价格、以及 GameState 里派生的加成公式。
+const UPGRADES := {
+	"insight": {
+		"name": "阅读产出", "glyph": "悟",
+		"desc": "小魔女读得更快，体悟自动累积得更多",
+		"effect": "+30% 体悟/秒", "max": 5,
+		"costs": [40, 90, 170, 300, 460],
+	},
+	"ink": {
+		"name": "纸笔效率", "glyph": "笔",
+		"desc": "施法更省，纸笔自然回复更快",
+		"effect": "+12% 纸笔回复", "max": 5,
+		"costs": [50, 110, 200, 340, 520],
+	},
+	"power": {
+		"name": "分身强化", "glyph": "身",
+		"desc": "所有分身的攻击与生命一起提高",
+		"effect": "+10% 攻/血", "max": 5,
+		"costs": [60, 130, 240, 400, 600],
+	},
+	"prep": {
+		"name": "开局准备", "glyph": "息",
+		"desc": "第一个字出现得更晚，开局多几秒布阵",
+		"effect": "+1.5 秒", "max": 4,
+		"costs": [70, 150, 270, 430],
+	},
+	"speed": {
+		"name": "加速上限", "glyph": "速",
+		"desc": "提高战斗里能开到的倍速上限",
+		"effect": "倍速 +1 档", "max": 2,
+		"costs": [120, 300],
+	},
+	"level": {
+		"name": "升级上限", "glyph": "阶",
+		"desc": "分身能升到的等级上限 +1，解锁第 4/5 级",
+		"effect": "上限 +1", "max": 2,
+		"costs": [180, 420],
+	},
+}
+
+## 升级轨道的显示顺序
+const UPGRADE_ORDER := ["insight", "ink", "power", "prep", "speed", "level"]
 
 const READ_BASE := 0.10
-## 买纸笔：一次性，立刻加进当前关卡。
-## 体悟主要该花在重建小屋上，所以这里刻意给得不划算。
+## 战斗里买纸笔：一次性，立刻加进当前关卡。
+## 体悟主要该花在书屋里，所以这里刻意给得不划算。
 const INK_PACK := {"cost": 45, "bonus": 12}
 const OFFLINE_CAP := 8.0 * 3600.0
 
