@@ -40,6 +40,10 @@ EVENTS = {
     "drawer": ("jump_05.wav", -14.0, 0.35),
     "boss": ("stinger_04.wav", -7.0, 1.20),
     "heal": ("spellzap_01.wav", -19.0, 0.25),
+    # 攻击反馈：每次出手都要有声音，但压得很低、靠节流控制密度
+    "fire": ("laser_05.wav", -17.0, 0.16),
+    "swing": ("plasma_04.wav", -15.0, 0.18),
+    "enemy_attack": ("hurt_05.wav", -19.0, 0.16),
 }
 
 

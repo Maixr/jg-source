@@ -43,6 +43,10 @@ var splats: Array = []
 var high_cells: Array = []
 var ground_cells: Array = []
 var routes: Array = []
+## 散落的文具：占住高台格，不能在那里放分身。
+## props 用来画，prop_cells 参与吸附（这样玩家点上去会看到"这里散落着文具"）
+var props: Array = []
+var prop_cells: Array = []
 
 var ink := 0.0
 var base_hp := 0
@@ -69,6 +73,8 @@ var _accum := 0.0
 ## 格子占用索引：坐标 -> Tower。绘制和放置都靠它做 O(1) 查询，
 ## 不再每次都遍历整个 towers 数组。
 var _cell_index := {}
+## 被文具占住的格子：坐标 -> 文具种类
+var _prop_cells := {}
 ## 按类别缓存的塔列表，供索敌使用（每逻辑步刷新一次）
 var _shields: Array = []
 var _blockers: Array = []
@@ -231,6 +237,70 @@ func _dist_to_routes(p: Vector2) -> float:
 	return best
 
 
+## 把每关「散落的文具」解析成具体格子：从可放置列表里拿走，记进 _prop_cells。
+func _build_props() -> void:
+	props.clear()
+	prop_cells.clear()
+	_prop_cells.clear()
+	for spec in UnitData.level_clutter(level_index):
+		var route_i := int(spec.get("route", 0))
+		if route_i < 0 or route_i >= routes.size():
+			continue
+		var pts: Array = (routes[route_i] as Dictionary).get("points", [])
+		if pts.size() < 2:
+			continue
+		var total := 0.0
+		var seglens: Array = []
+		for i in range(pts.size() - 1):
+			var seg_len: float = (pts[i] as Vector2).distance_to(pts[i + 1])
+			seglens.append(seg_len)
+			total += seg_len
+		if total <= 1.0:
+			continue
+		var target := total * float(spec.get("frac", 0.5))
+		var acc := 0.0
+		var anchor: Vector2 = pts[0]
+		var dir := Vector2.RIGHT
+		for i in range(seglens.size()):
+			var seg_len2: float = seglens[i]
+			if acc + seg_len2 >= target:
+				var k := (target - acc) / seg_len2
+				anchor = (pts[i] as Vector2).lerp(pts[i + 1], k)
+				var d := (pts[i + 1] as Vector2) - (pts[i] as Vector2)
+				if d.length_squared() > 0.0001:
+					dir = d.normalized()
+				break
+			acc += seg_len2
+		var side := 1.0 if float(spec.get("side", 1)) >= 0.0 else -1.0
+		var normal := Vector2(-dir.y, dir.x) * side
+		var want := anchor + normal * float(spec.get("off", 100.0))
+		var cell: Variant = _nearest_cell_in(want, high_cells, 130.0)
+		if cell == null:
+			continue
+		var key := _cell_key(cell)
+		if _prop_cells.has(key):
+			continue
+		high_cells.erase(cell)
+		prop_cells.append(cell)
+		_prop_cells[key] = str(spec.get("kind", "pencil"))
+		props.append({"kind": str(spec.get("kind", "pencil")), "pos": cell})
+
+
+func _nearest_cell_in(at: Vector2, list: Array, max_d: float) -> Variant:
+	var best: Variant = null
+	var best_d := max_d
+	for c in list:
+		var d := (c as Vector2).distance_to(at)
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
+
+
+func prop_kind_at(cell: Vector2) -> String:
+	return str(_prop_cells.get(_cell_key(cell), ""))
+
+
 func _dist_point_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var ab := b - a
 	var len_sq := ab.length_squared()
@@ -282,6 +352,7 @@ func start_level(index: int) -> void:
 	routes = UnitData.level_routes(index)
 	_quantize_routes()
 	_build_cells()
+	_build_props()
 	_spawns.clear()
 	_spawn_cursor = 0
 	kill_count = 0
@@ -394,19 +465,24 @@ func try_place(at: Vector2) -> bool:
 
 ## 把光标位置吸附到最近的同类格子上
 func _snap_cell(at: Vector2, kind: String) -> Variant:
-	var list: Array = ground_cells if kind == "ground" else high_cells
-	var best: Variant = null
 	var best_d := UnitData.GRID_STEP * 0.85
-	for c in list:
-		var d := (c as Vector2).distance_to(at)
-		if d < best_d:
-			best_d = d
-			best = c
-	return best
+	if kind == "ground":
+		return _nearest_cell_in(at, ground_cells, best_d)
+	# 高台要连「被文具占住的格子」一起参与吸附：
+	# 否则光标压在铅笔上时，塔会被甩到更远的那一格，玩家会觉得是 bug
+	var a: Variant = _nearest_cell_in(at, high_cells, best_d)
+	var b: Variant = _nearest_cell_in(at, prop_cells, best_d)
+	if a == null:
+		return b
+	if b == null:
+		return a
+	return a if (a as Vector2).distance_to(at) <= (b as Vector2).distance_to(at) else b
 
 
 ## 这一格能不能放。返回空串 = 可以放；否则是给玩家看的原因。
 func placement_error(tower_id: String, cell: Vector2) -> String:
+	if not prop_kind_at(cell).is_empty():
+		return "这里有散落的文具，放不下"
 	if cell_occupied(cell):
 		return "这一格已经有分身了"
 	if ink < float(tower_cost(tower_id)):
@@ -655,6 +731,38 @@ func _contact_blocker(en: Enemy) -> Tower:
 	return null
 
 
+## 目标是不是还在自己前方（沿当前路段朝向判断）。
+## 不加这个判断的话，敌人从盾身边过去之后还会被"吸"回去。
+func _is_ahead(en: Enemy, p: Vector2) -> bool:
+	var to := p - en.pos
+	if to.length_squared() < 0.0001:
+		return false
+	return en.dir().dot(to.normalized()) > 0.15
+
+
+## 挡满了、但确实横在路上的分身。
+##
+## 之前的表现：纸盾挡满 3 个之后，第 4 个敌人索敌失败就直接 advance()，
+## 于是从盾身上"穿"过去 —— 看起来就是穿模 bug。
+## 现在的规则是「挡不进去就排队」：贴着它停下等，等盾里的人被打死再顶上去。
+func _jam_blocker(en: Enemy) -> Tower:
+	for tw in _shields:
+		if tw.is_dead() or tw.engaged.has(en) or tw.can_block():
+			continue
+		if _box_dist(en.pos, tw.pos) > CONTACT_RANGE:
+			continue
+		if _is_ahead(en, tw.pos):
+			return tw
+	for tw in _blockers:
+		if tw.is_dead() or tw.engaged.has(en) or tw.can_block():
+			continue
+		if _box_dist(en.pos, tw.pos) > CONTACT_RANGE:
+			continue
+		if _is_ahead(en, tw.pos):
+			return tw
+	return null
+
+
 ## 敌人索敌，分三档优先级：纸盾 > 其他阻挡者 > 高台单位。
 ## 每步都重新算，所以盾一进射程就能抢走仇恨。
 func _pick_target(en: Enemy) -> Tower:
@@ -727,7 +835,7 @@ func _update_enemies(delta: float) -> void:
 				if en.cooldown < 0.0:
 					en.cooldown = 0.0
 				en.target.take_damage(en.atk)
-				_sfx("hit", -14, 0.9 if en.ranged else 1.0)
+				_sfx_var("enemy_attack", -12)
 				shots.append({"from": en.pos, "to": en.target.pos, "t": 0.0, "dur": 0.16,
 					"color": Color("d9573f") if not en.ranged else en.color})
 			# 远程单位：边打边往前挪一段，逼玩家不能只靠一个盾卡死
@@ -748,6 +856,9 @@ func _update_enemies(delta: float) -> void:
 		# 没目标时不让冷却一路跌成负数，否则一进射程会连打好几下
 		if en.cooldown < 0.0:
 			en.cooldown = 0.0
+		# 前面横着一个已经挡满了的分身 → 排队等着，不许从它身上走过去
+		if _jam_blocker(en) != null:
+			continue
 		en.advance(delta)
 
 
@@ -770,6 +881,7 @@ func _update_towers(delta: float) -> void:
 					if tw.cooldown < 0.0:
 						tw.cooldown = 0.0
 					target.take_damage(maxf(1.0, tw.atk - target.armor))
+					_sfx_var("fire", -9)
 					shots.append({"from": tw.pos, "to": target.pos, "t": 0.0, "dur": 0.14,
 						"color": tw.color})
 			"melee":
@@ -786,6 +898,7 @@ func _update_towers(delta: float) -> void:
 					if tw.cooldown < 0.0:
 						tw.cooldown = 0.0
 					tw.flash = 0.14
+					_sfx_var("swing", -8)
 			"heal":
 				var patient := _hurt_ally(tw)
 				if patient != null:

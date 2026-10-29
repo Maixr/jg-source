@@ -4,15 +4,15 @@
 
 | 你想怎么发 | 发哪个文件 | 对方怎么开始 |
 |---|---|---|
-| **发文件（推荐）** | `情感体悟-v0.1.10-win64.zip` | 解压 → **双击 `情感体悟-v0.1.10.exe`** |
-| 发链接 | `web-v0.1.10.zip` | 上传到 itch.io → 把链接发给对方 |
+| **发文件（推荐）** | `情感体悟-v0.1.11-win64.zip` | 解压 → **双击 `情感体悟-v0.1.11.exe`** |
+| 发链接 | `web-v0.1.11.zip` | 上传到 itch.io → 把链接发给对方 |
 
 > 文件名里的版号是脚本从 `core/unit_data.gd` 的 `GAME_VERSION` 读出来的，
 > 不用手改。
 
 ### ❗ Web 包不能解压双击
 
-`web-v0.1.10.zip` 里没有 exe。解压后双击 `index.html` 会白屏——
+`web-v0.1.11.zip` 里没有 exe。解压后双击 `index.html` 会白屏——
 浏览器对 `file://` 下的 `.wasm` 有安全限制，必须经 HTTP 服务器。
 它**只能**用来上传拿链接。
 
@@ -21,7 +21,7 @@
 ## 二、Windows 包（推荐）
 
 ```
-<项目同级>\jg-build\情感体悟-v0.1.10-win64.zip
+<项目同级>\jg-build\情感体悟-v0.1.11-win64.zip
   └─ 情感体悟-v0.1.0.exe                 105.6 MB（数据已内嵌，单文件）
   └─ 请先读我.txt
 ```
@@ -36,7 +36,7 @@
 ## 三、Web 包（要发链接时用）
 
 ```
-<项目同级>\jg-build\web-v0.1.10.zip
+<项目同级>\jg-build\web-v0.1.11.zip
 ```
 
 ### 本地自己看
@@ -73,9 +73,9 @@ powershell -ExecutionPolicy Bypass -File tools\export_web.ps1
 
 ```
 <jg 的上级目录>\jg-build\
-  情感体悟-v0.1.10.exe
-  情感体悟-v0.1.10-win64.zip
-  web\  +  web-v0.1.10.zip
+  情感体悟-v0.1.11.exe
+  情感体悟-v0.1.11-win64.zip
+  web\  +  web-v0.1.11.zip
 ```
 
 想换输出目录就设 `JGBUILD`；找不到 Godot 就设 `GODOT_BIN`（或 `GODOT_DIR`）。
@@ -89,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File tools\export_web.ps1
 
 ```gdscript
 const GAME_TITLE := "情感体悟"     # 出包文件名用
-const GAME_VERSION := "v0.1.10"    # 界面、标题栏、exe/zip 名都用它
+const GAME_VERSION := "v0.1.11"    # 界面、标题栏、exe/zip 名都用它
 ```
 
 打包脚本会自己正则读这两个常量，**不用再去改 `$exeName`**。

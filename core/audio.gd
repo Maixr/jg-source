@@ -18,6 +18,10 @@ const MIN_GAP := {
 	"place": 40,
 	"ui_click": 30,
 	"wave": 400,
+	# 攻击反馈：塔多了以后一秒可能十几次，压到 70~90ms 才不会糊成噪音
+	"fire": 70,
+	"swing": 90,
+	"enemy_attack": 120,
 }
 
 ## 固定名单：DirAccess 在某些导出包/平台上列不出目录时按它兜底加载
@@ -25,6 +29,7 @@ const KNOWN := [
 	"ui_click", "ui_back", "place", "upgrade", "remove",
 	"hit", "die", "leak", "wave", "win", "lose",
 	"card", "drawer", "boss", "heal",
+	"fire", "swing", "enemy_attack",
 ]
 
 var streams := {}

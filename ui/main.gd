@@ -119,6 +119,10 @@ func _ready() -> void:
 	if OS.has_environment("JG_SELFTEST"):
 		_run_placement_selftest.call_deferred()
 		return
+	# 穿盾回归测试
+	if OS.has_environment("JG_SHIELDTEST"):
+		_run_shield_test.call_deferred()
+		return
 	# 只截图关卡选择页（不带 JG_DEV_LEVEL 时走这里）
 	if OS.has_environment("JG_SHOT"):
 		_show_level_select()
@@ -502,10 +506,17 @@ func _hide_rule_banner() -> void:
 func _build_level_select() -> void:
 	level_panel = ColorRect.new()
 	level_panel.name = "LevelSelect"
-	level_panel.color = Color(0.06, 0.05, 0.04, 0.90)
+	level_panel.color = Color(0.08, 0.065, 0.05, 0.93)
 	level_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	level_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(level_panel)
+
+	# 装饰层放最前面：纸纹、飘着的字、小屋插画卡、角落文具，
+	# 都在内容（标题/关卡卡）下面
+	var decor := TitleDecor.new()
+	decor.name = "TitleDecor"
+	decor.set_anchors_preset(Control.PRESET_FULL_RECT)
+	level_panel.add_child(decor)
 
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1278,9 +1289,118 @@ func _run_grid_check() -> void:
 			var dy := absf(v.y - roundf(v.y / step) * step)
 			if dx > 0.01 or dy > 0.01:
 				offgrid += 1
-		print("GRID L%d ground=%d high=%d min_ground_ground=%.1f min_ground_high=%.1f off_lattice=%d" % [
-			i + 1, g.size(), h.size(), min_gg, min_gh, offgrid])
+		# 散落文具也要落在格点上，而且不能和可放置格重叠
+		var prop_overlap := 0
+		for c in field.prop_cells:
+			var pv := c as Vector2
+			var pdx := absf(pv.x - roundf(pv.x / step) * step)
+			var pdy := absf(pv.y - roundf(pv.y / step) * step)
+			if pdx > 0.01 or pdy > 0.01:
+				offgrid += 1
+			if h.has(c):
+				prop_overlap += 1
+		print("GRID L%d ground=%d high=%d props=%d min_ground_ground=%.1f min_ground_high=%.1f off_lattice=%d prop_overlap=%d" % [
+			i + 1, g.size(), h.size(), field.prop_cells.size(), min_gg, min_gh, offgrid, prop_overlap])
 	get_tree().quit()
+
+
+## 穿盾回归测试：JG_SHIELDTEST=1
+##
+## 场景：一个纸盾（挡 3）+ 6 个敌人。3 个挡住之后，剩下 3 个必须**排队**等着，
+## 不能从盾身上走过去 —— v0.1.10 修的就是「第 4 个开始穿模」。
+## 断言：没有任何活着的敌人越过盾所在的沿路位置。
+func _run_shield_test() -> void:
+	GS.save_enabled = false
+	field.audio_enabled = false
+	field.start_level(0)
+	field.stop_battle()
+	# 把自动波次和场景清空，只留我们自己摆的东西
+	field._spawns.clear()
+	field._spawn_cursor = 0
+	field.enemies.clear()
+	field.towers.clear()
+	field._reindex_towers()
+
+	var path: Array = (field.routes[0] as Dictionary).get("points", [])
+	if path.size() < 2 or field.ground_cells.size() < 6:
+		print("SHIELDTEST SKIP: 关卡数据不足")
+		get_tree().quit(2)
+		return
+
+	var cum := _path_cumulative(path)
+	var shield_cell: Vector2 = field.ground_cells[5]
+	field.ink = 999.0
+	field._place_exact("shield", shield_cell)
+	var shield: Tower = field.towers[0]
+	var shield_along := _along_pos(shield.pos, path, cum)
+
+	for i in 6:
+		var en := Enemy.new()
+		en.setup("zao", path, 1.0, 1.0)
+		field.enemies.append(en)
+
+	var dt := UnitData.FIXED_DT
+	var t := 0.0
+	while t < 9.0:
+		field._step(dt)
+		t += dt
+		if shield.is_dead():
+			break
+
+	var alive := 0
+	var passed := 0
+	var engaged := 0
+	for e in field.enemies:
+		var en := e as Enemy
+		if en.is_dead():
+			continue
+		alive += 1
+		if en.target == shield:
+			engaged += 1
+		if _along_at(en, path, cum) > shield_along + 8.0:
+			passed += 1
+
+	var ok: bool = passed == 0 and alive >= 5
+	print("SHIELDTEST %s alive=%d passed_through=%d engaged=%d shield_hp=%d" % [
+		"PASS" if ok else "FAIL", alive, passed, engaged, int(shield.hp)])
+	# 退出前清干净，免得 Godot 报 ObjectDB leak 警告
+	field.enemies.clear()
+	field.towers.clear()
+	get_tree().quit(0 if ok else 1)
+
+
+func _path_cumulative(path: Array) -> Array:
+	var cum: Array = [0.0]
+	for i in range(path.size() - 1):
+		cum.append(float(cum[i]) + (path[i] as Vector2).distance_to(path[i + 1]))
+	return cum
+
+
+## 敌人已经沿路走了多远
+func _along_at(en: Enemy, path: Array, cum: Array) -> float:
+	if en.seg >= path.size() - 1:
+		return float(cum[path.size() - 1])
+	var seg_l: float = (path[en.seg] as Vector2).distance_to(path[en.seg + 1])
+	return float(cum[en.seg]) + en.seg_t * seg_l
+
+
+## 某个世界坐标投影到路线上的里程
+func _along_pos(p: Vector2, path: Array, cum: Array) -> float:
+	var best := INF
+	var best_a := 0.0
+	for i in range(path.size() - 1):
+		var a: Vector2 = path[i]
+		var b: Vector2 = path[i + 1]
+		var ab := b - a
+		var len_sq := ab.length_squared()
+		if len_sq <= 0.0001:
+			continue
+		var k := clampf((p - a).dot(ab) / len_sq, 0.0, 1.0)
+		var d := p.distance_to(a + ab * k)
+		if d < best:
+			best = d
+			best_a = float(cum[i]) + k * sqrt(len_sq)
+	return best_a
 
 
 ## 一次性自检：吸附对齐 + 移除返还 + 清空存档。跑完会还原存档。

@@ -25,7 +25,7 @@ const BG := Color("2a231b")
 ## 版号 / 标题只在这一处维护：打包脚本会用正则从这里读，
 ## 不用再去 export_windows.ps1 里同步 $exeName。
 const GAME_TITLE := "情感体悟"
-const GAME_VERSION := "v0.1.10"
+const GAME_VERSION := "v0.1.11"
 const GAME_CHANNEL := "试玩版"
 const GAME_BUILD := "2026-10-30"
 
@@ -279,6 +279,77 @@ const BASE_DATA := {
 	],
 }
 
+# --- 散落的文具 ---
+## 路上以外的空地里散着一些文具，占住高台格，那一格就放不了分身。
+##
+## 位置不用绝对坐标写，而是「沿某条路线走到 frac 处，朝 side 那侧偏 off 像素」，
+## 建格子时自动吸附到最近的高台格。这样改地图布局时文具会跟着走，不用重算坐标。
+## 也不随机：随机会让同一关每次难度不同，玩家也没法记住地形。
+const CLUTTER := {
+	# 第 1 关：教学关，少放几件，别一上来就堵住
+	0: [
+		{"kind": "pencil", "route": 0, "frac": 0.10, "side": -1, "off": 100},
+		{"kind": "eraser", "route": 0, "frac": 0.20, "side": 1, "off": 96},
+		{"kind": "ruler", "route": 0, "frac": 0.34, "side": -1, "off": 104},
+		{"kind": "ink", "route": 0, "frac": 0.46, "side": 1, "off": 100},
+		{"kind": "clip", "route": 0, "frac": 0.60, "side": -1, "off": 96},
+		{"kind": "notebook", "route": 0, "frac": 0.72, "side": 1, "off": 104},
+		{"kind": "pencil", "route": 0, "frac": 0.86, "side": -1, "off": 100},
+	],
+	# 第 2 关：W 形折返，两侧空间多，撒得开一点
+	1: [
+		{"kind": "eraser", "route": 0, "frac": 0.08, "side": -1, "off": 100},
+		{"kind": "ruler", "route": 0, "frac": 0.18, "side": 1, "off": 96},
+		{"kind": "notebook", "route": 0, "frac": 0.28, "side": -1, "off": 104},
+		{"kind": "pencil", "route": 0, "frac": 0.38, "side": 1, "off": 100},
+		{"kind": "ink", "route": 0, "frac": 0.48, "side": -1, "off": 96},
+		{"kind": "clip", "route": 0, "frac": 0.58, "side": 1, "off": 104},
+		{"kind": "eraser", "route": 0, "frac": 0.68, "side": -1, "off": 100},
+		{"kind": "ruler", "route": 0, "frac": 0.78, "side": 1, "off": 96},
+		{"kind": "notebook", "route": 0, "frac": 0.88, "side": -1, "off": 104},
+		{"kind": "pencil", "route": 0, "frac": 0.95, "side": 1, "off": 100},
+	],
+	# 第 3 关：十字交叉，两条路各撒几件
+	2: [
+		{"kind": "pencil", "route": 0, "frac": 0.16, "side": 1, "off": 100},
+		{"kind": "ruler", "route": 0, "frac": 0.36, "side": -1, "off": 96},
+		{"kind": "ink", "route": 0, "frac": 0.58, "side": 1, "off": 104},
+		{"kind": "eraser", "route": 0, "frac": 0.82, "side": -1, "off": 100},
+		{"kind": "notebook", "route": 1, "frac": 0.14, "side": -1, "off": 100},
+		{"kind": "clip", "route": 1, "frac": 0.34, "side": 1, "off": 96},
+		{"kind": "pencil", "route": 1, "frac": 0.54, "side": -1, "off": 104},
+		{"kind": "ink", "route": 1, "frac": 0.74, "side": 1, "off": 100},
+		{"kind": "ruler", "route": 1, "frac": 0.92, "side": -1, "off": 96},
+		{"kind": "eraser", "route": 0, "frac": 0.94, "side": 1, "off": 100},
+	],
+	# 第 4 关：自环，路绕回来圈出一大片空地
+	3: [
+		{"kind": "pencil", "route": 0, "frac": 0.06, "side": 1, "off": 100},
+		{"kind": "notebook", "route": 0, "frac": 0.16, "side": -1, "off": 104},
+		{"kind": "eraser", "route": 0, "frac": 0.26, "side": 1, "off": 96},
+		{"kind": "ruler", "route": 0, "frac": 0.36, "side": -1, "off": 100},
+		{"kind": "clip", "route": 0, "frac": 0.46, "side": 1, "off": 104},
+		{"kind": "ink", "route": 0, "frac": 0.56, "side": -1, "off": 96},
+		{"kind": "pencil", "route": 0, "frac": 0.66, "side": 1, "off": 100},
+		{"kind": "notebook", "route": 0, "frac": 0.76, "side": -1, "off": 104},
+		{"kind": "eraser", "route": 0, "frac": 0.84, "side": 1, "off": 96},
+		{"kind": "ruler", "route": 0, "frac": 0.92, "side": -1, "off": 100},
+	],
+	# 第 5 关：三条路汇流，汇流前那段最挤，别把两边都堵死
+	4: [
+		{"kind": "ink", "route": 0, "frac": 0.12, "side": 1, "off": 100},
+		{"kind": "pencil", "route": 0, "frac": 0.30, "side": -1, "off": 96},
+		{"kind": "eraser", "route": 0, "frac": 0.55, "side": 1, "off": 104},
+		{"kind": "ruler", "route": 1, "frac": 0.12, "side": -1, "off": 100},
+		{"kind": "notebook", "route": 1, "frac": 0.34, "side": 1, "off": 96},
+		{"kind": "clip", "route": 1, "frac": 0.62, "side": -1, "off": 104},
+		{"kind": "pencil", "route": 2, "frac": 0.18, "side": 1, "off": 100},
+		{"kind": "ink", "route": 2, "frac": 0.42, "side": -1, "off": 96},
+		{"kind": "eraser", "route": 0, "frac": 0.80, "side": -1, "off": 104},
+		{"kind": "ruler", "route": 0, "frac": 0.92, "side": 1, "off": 100},
+	],
+}
+
 # --- 养成 ---
 const HOUSE_STAGES := [
 	{"name": "废墟", "cost": 0, "tower_mult": 1.00, "read_mult": 1.00},
@@ -327,6 +398,13 @@ static func level_routes(index: int) -> Array:
 	if index < 0 or index >= levels.size():
 		return []
 	return (levels[index] as Dictionary).get("routes", [])
+
+
+## 某一关散落的文具（定义见 CLUTTER；实际坐标由 BattleField._build_props 解析）
+static func level_clutter(index: int) -> Array:
+	if not CLUTTER.has(index):
+		return []
+	return CLUTTER[index]
 
 
 # --- 字体 ---

@@ -59,6 +59,7 @@ func _draw() -> void:
 	if _paper != null:
 		draw_texture_rect(_paper, Rect2(Vector2.ZERO, d), true)
 	_draw_path()
+	_draw_props()
 	# 格子提示只在「选了塔、正在找位置」时出现：
 	# 平时把两百个格子全画出来，整个棋盘都是十字，路面反而看不出重点。
 	_draw_cells()
@@ -87,6 +88,24 @@ func _draw_cell_ticks(p: Vector2, half: float, col: Color, width: float) -> void
 			draw_line(c, c - Vector2(0.0, sy * l), col, width)
 
 
+## 散落的文具：压在路旁的高台格上，等于告诉玩家「这一格放不了」
+func _draw_props() -> void:
+	for pr in field.props:
+		var p: Vector2 = pr["pos"]
+		# 用坐标算一个固定角度：看着像随手丢的，但每次进关完全一样
+		var ang := fmod(absf(p.x * 0.013 + p.y * 0.021), 1.0) * 1.2 - 0.6
+		InkArt.draw_prop(self, str(pr["kind"]), p, ang, 1.0, true)
+
+
+## 正在放塔时，被文具占住的格子画一个叉
+func _draw_cell_blocked(c: Variant) -> void:
+	var p: Vector2 = c
+	var half := UnitData.GRID_STEP * 0.5 - 6.0
+	var col := Color(0.85, 0.45, 0.38, 0.55)
+	draw_line(p + Vector2(-half, -half), p + Vector2(half, half), col, 2.0)
+	draw_line(p + Vector2(half, -half), p + Vector2(-half, half), col, 2.0)
+
+
 ## 正在放塔时才提示格子：当前塔型能放的格子高亮，另一种只留极淡的角
 func _draw_cells() -> void:
 	if field == null:
@@ -100,6 +119,10 @@ func _draw_cells() -> void:
 		_draw_cell(c, not ground, false)
 	for c in field.ground_cells:
 		_draw_cell(c, ground, true)
+	# 被文具占住的格子：放塔时标出「这里不行」
+	if not ground:
+		for c in field.prop_cells:
+			_draw_cell_blocked(c)
 
 
 func _draw_cell(c: Variant, active: bool, is_ground: bool) -> void:

@@ -70,6 +70,16 @@ func is_dead() -> bool:
 	return not alive
 
 
+## 当前所在路段的朝向（归一化）。用来判断某个分身还在不在自己前方。
+func dir() -> Vector2:
+	if seg >= _path.size() - 1:
+		return Vector2.RIGHT
+	var from: Vector2 = _path[seg]
+	var to: Vector2 = _path[seg + 1]
+	var d := to - from
+	return d.normalized() if d.length_squared() > 0.0001 else Vector2.RIGHT
+
+
 ## 沿路径推进。返回 true 表示已走到终点（漏怪）。
 func advance(delta: float) -> bool:
 	if target != null:

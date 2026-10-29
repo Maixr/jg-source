@@ -2,7 +2,7 @@
 
 ## 素材
 
-**IgnisForge Free SFX Sampler**（43 个合成复古音效，取其中 15 个）
+**IgnisForge Free SFX Sampler**（43 个合成复古音效，取其中 18 个）
 - 来源：https://opengameart.org/content/ignisforge-free-sfx-sampler-43-synthesized-retro-sound-effects
 - 作者：IgnisForge（https://ignisforge.itch.io）
 - 授权：**CC0 1.0（公有领域贡献）** —— 无需署名，可商用，无附加条件。
@@ -32,6 +32,9 @@
 | `drawer.wav` | jump_05 | 养成抽屉开合 |
 | `boss.wav` | stinger_04 | 首领「晦」登场 |
 | `heal.wav` | spellzap_01 | 疗愈符治疗（节流 220ms） |
+| `fire.wav` | laser_05 | 远程攻击出手（节流 70ms） |
+| `swing.wav` | plasma_04 | 近身攻击出手（节流 90ms） |
+| `enemy_attack.wav` | hurt_05 | 敌人打你的分身（节流 120ms） |
 
 ## 换音效
 
