@@ -22,12 +22,23 @@ const ORANGE := Color("e08a3c")
 const BG := Color("2a231b")
 
 # --- 版本号 ---
-const GAME_VERSION := "v0.1.9"
+## 版号 / 标题只在这一处维护：打包脚本会用正则从这里读，
+## 不用再去 export_windows.ps1 里同步 $exeName。
+const GAME_TITLE := "情感体悟"
+const GAME_VERSION := "v0.1.10"
 const GAME_CHANNEL := "试玩版"
-const GAME_BUILD := "2026-10-28"
+const GAME_BUILD := "2026-10-30"
 
 ## 纸笔自然回复速率（每秒）
 const INK_REGEN := 1.0 / 0.75
+
+# --- 时间步长 ---
+## 逻辑固定步长：模拟器和实机共用同一个步长，帧率与倍速都不再影响结果。
+## 之前直接用帧 delta，冷却余量被丢弃，帧率越高 DPS 越高，无头平衡自检
+## （0.1s 步长）和实机（约 0.017s）算出来也就不是同一回事了。
+const FIXED_DT := 1.0 / 60.0
+## 单帧 delta 上限：窗口被拖动或系统卡顿后不追帧，避免敌人一帧跨过判定框
+const MAX_DELTA := 0.1
 
 # --- 敌方单位 ---
 ## armor: 护甲，减免每次伤害（最低 1）
@@ -316,3 +327,40 @@ static func level_routes(index: int) -> Array:
 	if index < 0 or index >= levels.size():
 		return []
 	return (levels[index] as Dictionary).get("routes", [])
+
+
+# --- 字体 ---
+## 正文用无衬线（小字号清晰），标题用楷/宋（有书卷气）。
+## 优先挑「系统里可能装了的」手写/古籍体，最后一定回落到雅黑之类的安全项，
+## 所以这里只列名字、不分发字体文件，避免字体授权问题。
+const FONT_SANS := [
+	"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+	"Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "SimHei",
+]
+const FONT_BOOK := [
+	"LXGW WenKai", "霞鹜文楷", "KaiTi", "楷体", "STKaiti", "Kaiti SC", "Zhi Mang Xing",
+	"Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", "SimSun",
+]
+
+static var _font_sans: SystemFont
+static var _font_book: SystemFont
+
+
+static func _make_system_font(names: Array) -> SystemFont:
+	var f := SystemFont.new()
+	f.font_names = PackedStringArray(names)
+	f.allow_system_fallback = true
+	return f
+
+
+static func font_sans() -> SystemFont:
+	if _font_sans == null:
+		_font_sans = _make_system_font(FONT_SANS)
+	return _font_sans
+
+
+## 标题字体：楷体优先，没有就回落到正文那套
+static func font_book() -> SystemFont:
+	if _font_book == null:
+		_font_book = _make_system_font(FONT_BOOK + FONT_SANS)
+	return _font_book

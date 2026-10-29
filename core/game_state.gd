@@ -17,6 +17,8 @@ var cleared_count := 0
 var last_seen := 0
 ## 已经出现过（弹过介绍）的敌人类型
 var seen_enemies := {}
+## 音效开关（存在 settings.json，和键位同一个文件）
+var sfx_muted := false
 ## 键盘绑定：action -> Key 数字码
 var binds := {
 	"pause": KEY_SPACE,
@@ -27,6 +29,9 @@ var binds := {
 }
 
 var _autosave := 0.0
+## 上一次广播出去的整数体悟值：只在「显示的数字」变了才发信号。
+## 以前每帧都发，main 就每帧重建一遍 HUD 文本，纯属白烧 CPU。
+var _emitted_insight := -1
 ## 跑无头自检/平衡模拟时置 false：模拟会调用 mark_cleared / add_insight，
 ## 如果不拦就会把模拟结果写进玩家真实存档。
 var save_enabled := true
@@ -43,7 +48,11 @@ func _process(delta: float) -> void:
 	var gain := read_rate() * delta
 	if gain > 0.0:
 		insight += gain
-		insight_changed.emit(insight)
+		# 只在显示出来的整数变化时广播：HUD 只关心 1 位小数以外的变化
+		var shown := int(insight)
+		if shown != _emitted_insight:
+			_emitted_insight = shown
+			insight_changed.emit(insight)
 	_autosave += delta
 	if _autosave >= AUTOSAVE_INTERVAL:
 		_autosave = 0.0
@@ -99,6 +108,7 @@ func add_insight(amount: float) -> void:
 	if amount <= 0.0:
 		return
 	insight += amount
+	_emitted_insight = int(insight)
 	insight_changed.emit(insight)
 
 
@@ -211,6 +221,8 @@ func reset_progress() -> void:
 
 # --- 键位设置（写在单独的 settings.json，清空存档不会清掉）---
 
+## 设置文件里既存键位也存音效开关；键位是平的 "action -> keycode"，
+## 音效开关是额外的 sfx_muted 键，老存档没有这一项就按默认（开）处理。
 func load_binds() -> void:
 	if not FileAccess.file_exists(SETTINGS_PATH):
 		return
@@ -226,14 +238,23 @@ func load_binds() -> void:
 	for action in binds.keys():
 		if data.has(action):
 			binds[action] = int(data[action])
+	sfx_muted = bool(data.get("sfx_muted", false))
 
 
 func save_binds() -> void:
+	var payload := binds.duplicate()
+	payload["sfx_muted"] = sfx_muted
 	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify(binds, "\t"))
+	f.store_string(JSON.stringify(payload, "\t"))
 	f.close()
+
+
+func toggle_sfx() -> bool:
+	sfx_muted = not sfx_muted
+	save_binds()
+	return sfx_muted
 
 
 func bind_key(action: String) -> int:

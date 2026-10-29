@@ -4,12 +4,15 @@
 
 | 你想怎么发 | 发哪个文件 | 对方怎么开始 |
 |---|---|---|
-| **发文件（推荐）** | `情感体悟-v0.1.0-win64.zip`（37.7 MB） | 解压 → **双击 `情感体悟-v0.1.0.exe`** |
-| 发链接 | `jg-web-playtest.zip`（11.1 MB） | 上传到 itch.io → 把链接发给对方 |
+| **发文件（推荐）** | `情感体悟-v0.1.10-win64.zip` | 解压 → **双击 `情感体悟-v0.1.10.exe`** |
+| 发链接 | `web-v0.1.10.zip` | 上传到 itch.io → 把链接发给对方 |
+
+> 文件名里的版号是脚本从 `core/unit_data.gd` 的 `GAME_VERSION` 读出来的，
+> 不用手改。
 
 ### ❗ Web 包不能解压双击
 
-`jg-web-playtest.zip` 里没有 exe。解压后双击 `index.html` 会白屏——
+`web-v0.1.10.zip` 里没有 exe。解压后双击 `index.html` 会白屏——
 浏览器对 `file://` 下的 `.wasm` 有安全限制，必须经 HTTP 服务器。
 它**只能**用来上传拿链接。
 
@@ -18,7 +21,7 @@
 ## 二、Windows 包（推荐）
 
 ```
-D:\jg-build\情感体悟-v0.1.0-win64.zip     37.7 MB
+<项目同级>\jg-build\情感体悟-v0.1.10-win64.zip
   └─ 情感体悟-v0.1.0.exe                 105.6 MB（数据已内嵌，单文件）
   └─ 请先读我.txt
 ```
@@ -33,13 +36,13 @@ D:\jg-build\情感体悟-v0.1.0-win64.zip     37.7 MB
 ## 三、Web 包（要发链接时用）
 
 ```
-D:\jg-build\jg-web-playtest.zip          11.1 MB
+<项目同级>\jg-build\web-v0.1.10.zip
 ```
 
 ### 本地自己看
 
 ```powershell
-cd D:\jg-build\web
+cd <项目同级>\jg-build\web
 python -m http.server 8080
 # 浏览器打开 http://127.0.0.1:8080
 ```
@@ -60,27 +63,36 @@ python -m http.server 8080
 
 ```powershell
 # Windows（解压双击即玩）
-powershell -ExecutionPolicy Bypass -File D:\jg\tools\export_windows.ps1
+powershell -ExecutionPolicy Bypass -File tools\export_windows.ps1
 
 # Web（发链接）
-powershell -ExecutionPolicy Bypass -File D:\jg\tools\export_web.ps1
+powershell -ExecutionPolicy Bypass -File tools\export_web.ps1
 ```
+
+产物默认落在**项目同级目录**的 `jg-build\`：
+
+```
+<jg 的上级目录>\jg-build\
+  情感体悟-v0.1.10.exe
+  情感体悟-v0.1.10-win64.zip
+  web\  +  web-v0.1.10.zip
+```
+
+想换输出目录就设 `JGBUILD`；找不到 Godot 就设 `GODOT_BIN`（或 `GODOT_DIR`）。
 
 两个脚本都**从临时副本构建，不会改动**正在编辑器里打开的项目。
 必须带 `-ExecutionPolicy Bypass`，否则系统执行策略会拦。
 
 ### 发包前改版号
 
-只改 [unit_data.gd](<D:\jg\core\unit_data.gd>) 顶部三行：
+只改 [unit_data.gd](../core/unit_data.gd) 顶部两行：
 
 ```gdscript
-const GAME_VERSION := "v0.1.0"
-const GAME_CHANNEL := "试玩版"
-const GAME_BUILD := "2026-10-28"
+const GAME_TITLE := "情感体悟"     # 出包文件名用
+const GAME_VERSION := "v0.1.10"    # 界面、标题栏、exe/zip 名都用它
 ```
 
-版号在关卡选择页和顶栏右上角都会显示，方便对方报 version。
-注意：Windows 包的文件名写在 `export_windows.ps1` 的 `$exeName`，改版号时一并改。
+打包脚本会自己正则读这两个常量，**不用再去改 `$exeName`**。
 
 ---
 
@@ -103,13 +115,13 @@ Windows 需要：`windows_release_x86_64.exe`、`windows_debug_x86_64.exe`（78M
 $env:TPL_URL = "https://ghfast.top/https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz"
 
 # Web
-python D:\jg\tools\fetch_templates.py fetch web_nothreads_release web_nothreads_debug version.txt
+python tools\fetch_templates.py fetch web_nothreads_release web_nothreads_debug version.txt
 
 # Windows
-python D:\jg\tools\fetch_templates.py fetch windows_release_x86_64 windows_debug_x86_64 version.txt
+python tools\fetch_templates.py fetch windows_release_x86_64 windows_debug_x86_64 version.txt
 
 # 看整包清单
-python D:\jg\tools\fetch_templates.py list
+python tools\fetch_templates.py list
 ```
 
 ---
