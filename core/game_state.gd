@@ -212,8 +212,16 @@ func mark_cleared(index: int) -> void:
 
 # --- 存档 ---
 
-func save_state() -> void:
+## 写存档。force 只给 reset_progress() 用 —— 只有「玩家明确点了清档」才允许把进度写成全零。
+##
+## 这道保险是踩过坑加的：某次自检/编辑器流程在 save_enabled 没生效的瞬间调了 reset，
+## 结果把玩家几千体悟和整套书屋升级写成了 0。写之前比一下磁盘上的旧档，
+## 发现「内存里全空、磁盘上有进度」就拒绝，宁可这一帧不存。
+func save_state(force := false) -> void:
 	if not save_enabled:
+		return
+	if not force and _is_blank_progress() and _disk_has_progress():
+		push_warning("GameState: 拒绝用空进度覆盖存档（不是明确清档）")
 		return
 	last_seen = int(Time.get_unix_time_from_system())
 	var data := {
@@ -229,6 +237,35 @@ func save_state() -> void:
 		return
 	f.store_string(JSON.stringify(data, "\t"))
 	f.close()
+
+
+## 内存里的进度是否已经「空」了（被打回初始状态）
+func _is_blank_progress() -> bool:
+	if insight > 0.5 or cleared_count > 0:
+		return false
+	for id in UnitData.UPGRADE_ORDER:
+		if up_level(id) > 0:
+			return false
+	return true
+
+
+## 磁盘上的旧档是否还有进度
+func _disk_has_progress() -> bool:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return false
+	var text := FileAccess.get_file_as_string(SAVE_PATH)
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		return false
+	var d: Dictionary = parsed
+	if float(d.get("insight", 0.0)) > 0.5 or int(d.get("cleared_count", 0)) > 0:
+		return true
+	var ups: Variant = d.get("upgrades", null)
+	if ups is Dictionary:
+		for id in UnitData.UPGRADE_ORDER:
+			if int((ups as Dictionary).get(id, 0)) > 0:
+				return true
+	return int(d.get("house_stage", 0)) > 0
 
 
 func load_state() -> void:
@@ -282,7 +319,7 @@ func reset_progress() -> void:
 	cleared_count = 0
 	last_seen = 0
 	seen_enemies = {}
-	save_state()
+	save_state(true)
 	_emitted_insight = int(insight)
 	insight_changed.emit(insight)
 	upgrades_changed.emit()

@@ -473,6 +473,8 @@ func _build_home() -> void:
 	add_child(home_panel)
 	home_panel.open_levels.connect(_on_home_levels)
 	home_panel.open_house.connect(_on_home_house)
+	home_panel.open_settings.connect(_open_settings)
+	home_panel.clear_requested.connect(_on_clear_requested)
 
 
 func _build_house() -> void:
@@ -644,21 +646,11 @@ func _build_level_select() -> void:
 	footer.add_theme_constant_override("separation", 12)
 	col.add_child(footer)
 
+	# 设置与清档已经挪到首页（home_screen.gd），这里只留「返回首页」
 	var back_home := _make_button("返回首页")
-	back_home.custom_minimum_size = Vector2(140.0, 40.0)
+	back_home.custom_minimum_size = Vector2(160.0, 40.0)
 	back_home.pressed.connect(_on_back_home)
 	footer.add_child(back_home)
-
-	var key_btn := _make_button("按键与音效")
-	key_btn.custom_minimum_size = Vector2(160.0, 40.0)
-	key_btn.pressed.connect(_open_settings)
-	footer.add_child(key_btn)
-
-	var clear_btn := _make_button("清空存档")
-	clear_btn.custom_minimum_size = Vector2(160.0, 40.0)
-	clear_btn.add_theme_color_override("font_color", Color(0.80, 0.58, 0.52))
-	clear_btn.pressed.connect(_on_clear_requested)
-	footer.add_child(clear_btn)
 
 	var ver_line := _make_label("%s %s · 构建 %s" % [
 		UnitData.GAME_VERSION, UnitData.GAME_CHANNEL, UnitData.GAME_BUILD])
@@ -939,7 +931,8 @@ func _on_clear_cancelled() -> void:
 func _on_clear_confirmed() -> void:
 	confirm_panel.visible = false
 	GS.reset_progress()
-	_show_level_select()
+	# 清档入口现在在首页，清完回首页（书架上一切归零，书屋退出所有升级）
+	_show_home()
 	result_panel.visible = false
 
 

@@ -25,7 +25,7 @@ const BG := Color("2a231b")
 ## 版号 / 标题只在这一处维护：打包脚本会用正则从这里读，
 ## 不用再去 export_windows.ps1 里同步 $exeName。
 const GAME_TITLE := "斋悟"
-const GAME_VERSION := "v0.2.0"
+const GAME_VERSION := "v0.2.1"
 const GAME_CHANNEL := "试玩版"
 const GAME_BUILD := "2026-10-30"
 

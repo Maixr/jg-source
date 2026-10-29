@@ -11,6 +11,9 @@ extends Control
 
 signal open_levels()
 signal open_house()
+## 首页右上角的小菜单：按键与音效 / 清空存档
+signal open_settings()
+signal clear_requested()
 
 const TITLE := "斋悟"
 
@@ -25,7 +28,6 @@ const BOOK := Rect2(206.0, 372.0, 104.0, 188.0)
 
 var _paper: ImageTexture
 var _vignette: ImageTexture
-var _house: Texture2D
 var _font_book: Font
 var _font_sans: Font
 
@@ -42,9 +44,29 @@ func _ready() -> void:
 	_font_sans = UnitData.font_sans()
 	_paper = _make_paper()
 	_vignette = _make_vignette()
-	if ResourceLoader.exists("res://art/house/house_intact.jpg"):
-		_house = load("res://art/house/house_intact.jpg")
+	_build_corner_buttons()
 	set_process(true)
+
+
+## 右上角两个按钮：以前在选关页页脚，现在收到首页当常驻菜单。
+## 用真按钮（而不是自己画热区），这样 hover / 按下反馈、键盘焦点、按钮墨点都自动有。
+func _build_corner_buttons() -> void:
+	var clear := Button.new()
+	clear.text = "清空存档"
+	clear.custom_minimum_size = Vector2(150.0, 38.0)
+	clear.position = Vector2(1600.0 - 30.0 - 150.0, 38.0)
+	clear.add_theme_color_override("font_color", Color(0.80, 0.58, 0.52))
+	UiStyle.apply_button(clear)
+	clear.pressed.connect(func(): clear_requested.emit())
+	add_child(clear)
+
+	var keys := Button.new()
+	keys.text = "按键与音效"
+	keys.custom_minimum_size = Vector2(150.0, 38.0)
+	keys.position = Vector2(1600.0 - 30.0 - 150.0 - 12.0 - 150.0, 38.0)
+	UiStyle.apply_button(keys)
+	keys.pressed.connect(func(): open_settings.emit())
+	add_child(keys)
 
 
 func reset() -> void:

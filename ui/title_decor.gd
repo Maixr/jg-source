@@ -21,7 +21,6 @@ const DECOR_SEED := 20261030
 var _t := 0.0
 var _paper: ImageTexture
 var _vignette: ImageTexture
-var _house: Texture2D
 var _glyphs: Array = []
 var _font_book: Font
 var _font_sans: Font
@@ -33,8 +32,6 @@ func _ready() -> void:
 	_font_sans = UnitData.font_sans()
 	_paper = _make_paper()
 	_vignette = _make_vignette()
-	if ResourceLoader.exists("res://art/house/house_intact.jpg"):
-		_house = load("res://art/house/house_intact.jpg")
 	_spawn_glyphs()
 	set_process(true)
 
@@ -120,7 +117,6 @@ func _draw() -> void:
 	_draw_glyphs()
 	if _vignette != null:
 		draw_texture_rect(_vignette, Rect2(Vector2.ZERO, Vector2(w, h)), false)
-	_draw_house_card()
 	_draw_stationery()
 
 
@@ -142,39 +138,6 @@ func _draw_glyphs() -> void:
 		draw_string(_font_book, Vector2(-sz * 0.5, sz * 0.34), str(g["ch"]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, sz, col)
 		draw_set_transform(Vector2.ZERO, 0.0)
-
-
-## 左下角的小屋插画卡：把养成目标直接摆在标题页
-func _draw_house_card() -> void:
-	var card := Rect2(46.0, 236.0, 322.0, 348.0)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.95, 0.92, 0.84, 0.97)
-	sb.border_color = Color(UnitData.WOOD.r, UnitData.WOOD.g, UnitData.WOOD.b, 0.9)
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(14)
-	draw_style_box(sb, card)
-
-	# 插画：按「填满」裁切，避免拉伸变形
-	var img := Rect2(card.position + Vector2(12.0, 12.0), Vector2(card.size.x - 24.0, 232.0))
-	if _house != null:
-		var tex_size := _house.get_size()
-		if tex_size.x > 0.0 and tex_size.y > 0.0:
-			var scale := maxf(img.size.x / tex_size.x, img.size.y / tex_size.y)
-			var src_size := img.size / scale
-			var src := Rect2((tex_size - src_size) * 0.5, src_size)
-			draw_texture_rect_region(_house, img, src)
-			# 压一层暖色，让插画和纸卡同一个调子
-			draw_rect(img, Color(0.42, 0.30, 0.16, 0.10), true)
-
-	var ink := Color(0.22, 0.18, 0.14, 0.95)
-	draw_string(_font_book, Vector2(card.position.x + 14.0, card.position.y + 268.0),
-		"小魔女的书屋", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, ink)
-	draw_string(_font_sans, Vector2(card.position.x + 14.0, card.position.y + 296.0),
-		"重建它：分身更强，体悟来得更快", HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
-		Color(0.38, 0.32, 0.26, 0.9))
-	draw_string(_font_sans, Vector2(card.position.x + 14.0, card.position.y + 320.0),
-		"重建进度会存下来，下次打开还在", HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
-		Color(0.46, 0.40, 0.33, 0.85))
 
 
 ## 四角散落的文具：和战场上的是同一套画法，视觉上算一套语言
