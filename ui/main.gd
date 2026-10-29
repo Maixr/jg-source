@@ -87,11 +87,7 @@ func _ready() -> void:
 	GS.house_changed.connect(func(_s): _refresh_drawer())
 
 	# --- 开发/自检入口（正式版可以删掉这一段）---
-	# 这些入口会把存档写坏（例如自动打完一关就记成通关），所以统一关掉写盘。
-	if OS.has_environment("JG_DEV_LEVEL") or OS.has_environment("JG_SHOT") \
-			or OS.has_environment("JG_BALANCE") or OS.has_environment("JG_GRIDCHECK") \
-			or OS.has_environment("JG_SELFTEST"):
-		GS.save_enabled = false
+	# 存档只读的守卫在 GameState 里（Autoload 先跑，即使本脚本解析失败也生效）。
 	if OS.has_environment("JG_BALANCE"):
 		_run_balance_check.call_deferred()
 		return

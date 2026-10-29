@@ -37,7 +37,22 @@ var _emitted_insight := -1
 var save_enabled := true
 
 
+## 这些环境变量是给自检/截图用的开发入口。
+## 只要带着它们启动，存档就一律只读 —— 守卫必须放在 Autoload 里，
+## 而不是 main.gd：main.gd 解析失败过（也会让整局跑起来），
+## 那种情况下守卫要是没生效，自检就会把玩家进度改掉。
+const DEV_ENV := [
+	"JG_BALANCE", "JG_GRIDCHECK", "JG_SELFTEST", "JG_SHIELDTEST",
+	"JG_DEV_LEVEL", "JG_SHOT", "JG_WININFO",
+]
+
+
 func _ready() -> void:
+	for k in DEV_ENV:
+		if OS.has_environment(k):
+			save_enabled = false
+			print("GameState: 检测到 %s，存档改为只读" % k)
+			break
 	load_state()
 	load_binds()
 	_apply_offline_gain()
